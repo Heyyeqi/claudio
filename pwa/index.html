@@ -1,0 +1,2480 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<title>Claudio</title>
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<link rel="manifest" href="/manifest.json">
+<meta name="apple-mobile-web-app-capable" content="yes">
+<meta name="apple-mobile-web-app-status-bar-style" content="black-translucent">
+<meta name="apple-mobile-web-app-title" content="Claudio FM">
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link href="https://fonts.googleapis.com/css2?family=Cormorant+Garamond:wght@400;600&family=JetBrains+Mono:wght@400;500&family=Noto+Serif+SC:wght@400;500&display=swap" rel="stylesheet">
+<style>
+  :root {
+    --bg: #080808;
+    --accent: #C9A96E;
+    --text-main: #F0EDE8;
+    --text-sub: rgba(240, 237, 232, 0.52);
+    --text-dim: rgba(240, 237, 232, 0.28);
+    --line: rgba(240, 237, 232, 0.08);
+    --surface: rgba(255, 255, 255, 0.025);
+    --surface-2: rgba(255, 255, 255, 0.04);
+    --bubble-dj: rgba(255, 255, 255, 0.04);
+    --bubble-commentary: rgba(255, 255, 255, 0.03);
+    --bubble-you: rgba(201, 169, 110, 0.08);
+    --control: #5A5A5A;
+    --control-hover: #C9A96E;
+    --on-air: #7BB87A;
+    --input-bg: rgba(255, 255, 255, 0.02);
+  }
+
+  * { box-sizing: border-box; }
+
+  html, body {
+    margin: 0;
+    min-height: 100%;
+    background: var(--bg);
+  }
+
+  body {
+    min-height: 100vh;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    padding: 16px;
+    color: var(--text-main);
+    font-family: -apple-system, BlinkMacSystemFont, "Helvetica Neue", sans-serif;
+  }
+
+  #app {
+    position: relative;
+    width: min(430px, 100%);
+    height: min(820px, calc(100vh - 32px));
+    overflow: hidden;
+    border-radius: 28px;
+    background: var(--bg);
+    box-shadow:
+      0 0 0 1px rgba(255,255,255,0.04),
+      0 22px 70px rgba(0,0,0,0.55),
+      inset 0 1px 0 rgba(255,255,255,0.02);
+  }
+
+  #weather-canvas {
+    position: absolute;
+    inset: 0;
+    width: 100%;
+    height: 100%;
+    pointer-events: none;
+    z-index: 1;
+  }
+
+  .panel-layer {
+    position: relative;
+    z-index: 3;
+    width: 100%;
+    height: 100%;
+    display: flex;
+    flex-direction: column;
+  }
+
+  .topbar {
+    height: 28px;
+    border-bottom: 1px solid var(--line);
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    font-family: "JetBrains Mono", monospace;
+    font-size: 9px;
+    letter-spacing: 0.38em;
+    color: var(--text-dim);
+  }
+
+  .hero {
+    position: relative;
+    flex: 0 0 60%;
+    min-height: 360px;
+    padding: 26px 28px 0;
+    display: flex;
+    flex-direction: column;
+  }
+
+  .hero-meta {
+    position: relative;
+    z-index: 2;
+    display: grid;
+    grid-template-columns: 1fr auto 1fr;
+    align-items: start;
+    font-family: "JetBrains Mono", monospace;
+    font-size: 11px;
+    letter-spacing: 0.12em;
+  }
+
+  .hero-time {
+    color: var(--text-sub);
+  }
+
+  .hero-city {
+    justify-self: center;
+    font-size: 10px;
+    letter-spacing: 0.2em;
+    color: var(--text-sub);
+    text-transform: uppercase;
+  }
+
+  .hero-onair {
+    justify-self: end;
+    display: inline-flex;
+    align-items: center;
+    gap: 7px;
+    color: var(--on-air);
+  }
+
+  .hero-onair-dot {
+    width: 7px;
+    height: 7px;
+    border-radius: 50%;
+    background: var(--on-air);
+    box-shadow: 0 0 10px rgba(123,184,122,0.6);
+  }
+
+  .theme-preview {
+    position: absolute;
+    top: 56px;
+    right: 22px;
+    z-index: 4;
+    display: flex;
+    justify-content: flex-end;
+    flex-wrap: wrap;
+    gap: 8px;
+    max-width: 180px;
+    pointer-events: auto;
+  }
+
+  .theme-chip {
+    appearance: none;
+    border: 1px solid var(--line);
+    background: rgba(0, 0, 0, 0.28);
+    color: var(--text-sub);
+    padding: 6px 10px;
+    min-width: 44px;
+    font-family: "JetBrains Mono", monospace;
+    font-size: 10px;
+    letter-spacing: 0.08em;
+    cursor: pointer;
+    transition: color 120ms ease, border-color 120ms ease, background-color 120ms ease;
+  }
+
+  .theme-chip:hover {
+    color: var(--accent);
+    border-color: rgba(201, 169, 110, 0.35);
+  }
+
+  .theme-chip.active {
+    color: var(--accent);
+    border-color: rgba(201, 169, 110, 0.45);
+    background: rgba(201, 169, 110, 0.08);
+  }
+
+  .hero-center {
+    position: relative;
+    z-index: 2;
+    flex: 1;
+    display: flex;
+    flex-direction: column;
+    align-items: center;
+    justify-content: center;
+    text-align: center;
+    margin-top: -22px;
+  }
+
+  .hero-title {
+    margin: 0;
+    max-width: 92%;
+    font-family: "Cormorant Garamond", "Noto Serif SC", "Source Han Serif CN", serif;
+    font-style: normal;
+    font-weight: 400;
+    line-height: 0.94;
+    letter-spacing: 0.02em;
+    color: var(--text-main);
+    text-wrap: balance;
+    word-break: break-word;
+    overflow-wrap: break-word;
+  }
+
+  .hero-title-rule {
+    width: 32px;
+    height: 1px;
+    background: var(--accent);
+    opacity: 0.3;
+    margin: 10px auto 0;
+  }
+
+  .hero-artist {
+    margin-top: 10px;
+    font-size: 9.5px;
+    font-weight: 300;
+    font-variant: small-caps;
+    letter-spacing: 0.28em;
+    font-family: "Cormorant Garamond", "Noto Serif SC", serif;
+    color: var(--text-dim);
+  }
+
+  .hero-commentary {
+    margin-top: 40px;
+    max-width: 72%;
+    min-height: 34px;
+    font-family: "Cormorant Garamond", "Noto Serif SC", serif;
+    font-size: 14px;
+    font-style: italic;
+    font-weight: 400;
+    line-height: 2;
+    color: var(--text-sub);
+    letter-spacing: 0.03em;
+    border-left: 1.5px solid var(--accent);
+    padding-left: 14px;
+    text-align: left;
+    margin-left: auto;
+    margin-right: auto;
+    opacity: 0;
+    transform: translateY(8px);
+    transition: opacity 320ms ease, transform 320ms ease;
+  }
+
+  .hero-commentary.visible {
+    opacity: 1;
+    transform: translateY(0);
+  }
+
+  .progress-wrap {
+    position: relative;
+    z-index: 2;
+    padding: 0 28px 20px;
+  }
+
+  .progress-line {
+    position: relative;
+    width: 100%;
+    height: 1.5px;
+    background: var(--line);
+    cursor: pointer;
+  }
+
+  .progress-line-fill {
+    position: absolute;
+    inset: 0 auto 0 0;
+    width: 0;
+    height: inherit;
+  }
+
+  .progress-meta {
+    margin-top: 12px;
+    display: flex;
+    justify-content: space-between;
+    font-family: "JetBrains Mono", monospace;
+    font-size: 9px;
+    color: var(--text-dim);
+  }
+
+  .controls {
+    flex: 0 0 60px;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    gap: 24px;
+    border-top: 1px solid var(--line);
+    border-bottom: 1px solid var(--line);
+  }
+
+  .control-btn {
+    appearance: none;
+    border: 0;
+    background: transparent;
+    color: var(--control);
+    width: 28px;
+    height: 28px;
+    padding: 0;
+    display: grid;
+    place-items: center;
+    cursor: pointer;
+    transition: color 120ms ease, opacity 120ms ease, transform 120ms ease;
+  }
+
+  .control-btn:hover:not(:disabled) {
+    color: var(--control-hover);
+    transform: translateY(-1px);
+  }
+
+  .control-btn:disabled {
+    cursor: default;
+    opacity: 0.4;
+  }
+
+  .drawer {
+    position: absolute;
+    inset: auto 0 0 0;
+    height: 44%;
+    display: flex;
+    flex-direction: column;
+    isolation: isolate;
+    overflow: hidden;
+    transform: translateY(calc(100% - 44px));
+    transition: transform 320ms ease;
+    background: transparent;
+    border-top: none;
+    box-shadow: inset 0 1px 0 var(--line);
+    backdrop-filter: blur(28px);
+    -webkit-backdrop-filter: blur(28px);
+  }
+
+  .drawer::before {
+    content: "";
+    position: absolute;
+    top: -32px;
+    left: 0;
+    right: 0;
+    height: 32px;
+    pointer-events: none;
+    background: linear-gradient(to bottom, transparent, var(--bg));
+    z-index: 2;
+  }
+
+  .drawer.open {
+    transform: translateY(0);
+  }
+
+  .drawer-handle {
+    appearance: none;
+    border: 0;
+    background: transparent;
+    color: var(--text-dim);
+    padding: 14px 28px 10px;
+    cursor: pointer;
+    position: relative;
+    z-index: 3;
+  }
+
+  .drawer-handle-line {
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    height: 18px;
+    position: relative;
+  }
+
+  .drawer-handle-line::before {
+    content: "";
+    width: 96px;
+    height: 2px;
+    background: var(--line);
+    position: absolute;
+  }
+
+  .drawer-handle-arrow {
+    position: relative;
+    z-index: 1;
+    background: var(--bg);
+    transition: transform 280ms ease;
+  }
+
+  .drawer-content {
+    min-height: 0;
+    flex: 1;
+    display: flex;
+    flex-direction: column;
+    position: relative;
+    z-index: 1;
+  }
+
+  .queue-panel {
+    padding: 4px 28px 12px;
+    border-bottom: 1px solid var(--line);
+    max-height: 52%;
+    overflow-y: auto;
+  }
+
+  .queue-head {
+    display: flex;
+    justify-content: space-between;
+    font-family: "JetBrains Mono", monospace;
+    font-size: 9px;
+    letter-spacing: 0.22em;
+    color: var(--text-dim);
+    margin-bottom: 14px;
+  }
+
+  .queue-list {
+    display: flex;
+    flex-direction: column;
+    gap: 0;
+  }
+
+  .queue-item {
+    width: 100%;
+    border: 0;
+    background: transparent;
+    color: inherit;
+    padding: 11px 0 11px 0;
+    display: grid;
+    grid-template-columns: 24px 1fr;
+    gap: 10px;
+    align-items: start;
+    text-align: left;
+    cursor: pointer;
+    border-bottom: 1px solid var(--line);
+    margin-bottom: 0;
+  }
+
+  .queue-item:last-child {
+    border-bottom: none;
+  }
+
+  .queue-item-num {
+    font-family: "JetBrains Mono", monospace;
+    font-size: 9px;
+    color: var(--text-dim);
+    padding-top: 2px;
+    min-width: 20px;
+  }
+
+  .queue-item-num.queue-item-playing {
+    color: var(--accent);
+    font-size: 14px;
+  }
+
+  .queue-item-title {
+    font-family: -apple-system, BlinkMacSystemFont, "Helvetica Neue", sans-serif;
+    font-size: 13px;
+    font-weight: 400;
+    line-height: 1.3;
+    letter-spacing: 0.01em;
+    color: var(--text-main);
+  }
+
+  .queue-item-artist {
+    margin-top: 2px;
+    font-family: "JetBrains Mono", monospace;
+    font-size: 9px;
+    letter-spacing: 0.16em;
+    text-transform: uppercase;
+    color: var(--text-dim);
+  }
+
+  .queue-panel::-webkit-scrollbar {
+    width: 2px;
+  }
+
+  .queue-panel::-webkit-scrollbar-thumb {
+    background: var(--line);
+    border-radius: 1px;
+  }
+
+  .chat-panel {
+    min-height: 0;
+    flex: 1;
+    display: flex;
+    flex-direction: column;
+  }
+
+  .chat-scroll {
+    min-height: 0;
+    flex: 1;
+    overflow-y: auto;
+    padding: 18px 28px 12px;
+  }
+
+  .chat-live {
+    display: flex;
+    align-items: center;
+    gap: 12px;
+    margin-bottom: 18px;
+    font-family: "JetBrains Mono", monospace;
+    font-size: 11px;
+    letter-spacing: 0.18em;
+    color: var(--text-dim);
+  }
+
+  .chat-live::before,
+  .chat-live::after {
+    content: "";
+    flex: 1;
+    height: 1px;
+    background: var(--line);
+  }
+
+  .msg {
+    margin-bottom: 20px;
+  }
+
+  .msg.you {
+    display: flex;
+    flex-direction: column;
+    align-items: flex-end;
+  }
+
+  .msg-label {
+    display: flex;
+    align-items: center;
+    gap: 10px;
+    margin-bottom: 8px;
+    font-family: "JetBrains Mono", monospace;
+    font-size: 11px;
+    letter-spacing: 0.18em;
+    color: var(--text-dim);
+  }
+
+  .msg-avatar {
+    width: 22px;
+    height: 22px;
+    border: 1px solid var(--line);
+    display: grid;
+    place-items: center;
+    font-size: 12px;
+  }
+
+  .msg-bubble {
+    max-width: 88%;
+    padding: 14px 16px;
+    background: var(--bubble-dj);
+    color: var(--text-main);
+    font-size: 14px;
+    line-height: 1.62;
+  }
+
+  .msg-commentary {
+    background: var(--bubble-commentary);
+    border-left: 2px solid var(--accent);
+  }
+
+  .msg.you .msg-bubble {
+    background: var(--bubble-you);
+  }
+
+  .msg-time {
+    margin-top: 8px;
+    display: flex;
+    align-items: center;
+    gap: 10px;
+    font-family: "JetBrains Mono", monospace;
+    font-size: 11px;
+    letter-spacing: 0.18em;
+    color: var(--text-dim);
+  }
+
+  .msg.you .msg-time {
+    justify-content: flex-end;
+  }
+
+  .msg-replay {
+    appearance: none;
+    border: 0;
+    background: transparent;
+    color: var(--accent);
+    padding: 0;
+    font: inherit;
+    letter-spacing: inherit;
+    cursor: pointer;
+  }
+
+  .composer {
+    padding: 14px 28px 18px;
+    display: grid;
+    grid-template-columns: 1fr 54px;
+    gap: 12px;
+    border-top: 1px solid var(--line);
+  }
+
+  .composer-input {
+    width: 100%;
+    appearance: none;
+    border: 1px solid var(--line);
+    background: rgba(255,255,255,0.14);
+    color: var(--text-main);
+    min-height: 48px;
+    padding: 0 16px;
+    font-size: 15px;
+    outline: none;
+  }
+
+  .composer-input::placeholder {
+    color: var(--text-dim);
+  }
+
+  .composer-send {
+    appearance: none;
+    border: 1px solid var(--line);
+    background: rgba(255,255,255,0.12);
+    color: var(--text-main);
+    cursor: pointer;
+    transition: color 120ms ease, border-color 120ms ease, transform 120ms ease;
+  }
+
+  .composer-send:hover:not(:disabled) {
+    color: var(--accent);
+    border-color: rgba(201, 169, 110, 0.35);
+    transform: translateY(-1px);
+  }
+
+  .composer-send:disabled {
+    cursor: default;
+    opacity: 0.4;
+  }
+
+  .overlay {
+    position: absolute;
+    inset: 0;
+    z-index: 5;
+    display: none;
+    align-items: center;
+    justify-content: center;
+    background: rgba(0,0,0,0.62);
+    backdrop-filter: blur(12px);
+    -webkit-backdrop-filter: blur(12px);
+  }
+
+  .overlay.visible {
+    display: flex;
+  }
+
+  .overlay-button {
+    appearance: none;
+    border: 1px solid var(--line);
+    background: transparent;
+    color: var(--text-sub);
+    padding: 14px 40px;
+    border-radius: 0;
+    box-shadow: none;
+    font-family: "Cormorant Garamond", serif;
+    font-size: 13px;
+    font-weight: 400;
+    letter-spacing: 0.38em;
+    text-transform: uppercase;
+    cursor: pointer;
+    transition: color 200ms ease, border-color 200ms ease;
+  }
+
+  .overlay-button:hover {
+    color: var(--accent);
+    border-color: rgba(201,169,110,0.45);
+  }
+
+  #app.dj-speaking .hero-title {
+    opacity: 0.72;
+    transition: opacity 600ms ease;
+  }
+
+  #app.dj-speaking .hero-artist {
+    opacity: 0.5;
+    transition: opacity 600ms ease;
+  }
+
+  #app.dj-speaking .progress-wrap {
+    opacity: 0.6;
+    transition: opacity 600ms ease;
+  }
+
+  #app.dj-speaking .hero-onair-dot {
+    animation: dj-pulse 1.8s ease-in-out infinite;
+  }
+
+  @keyframes dj-pulse {
+    0%, 100% { box-shadow: 0 0 6px rgba(123,184,122,0.5); transform: scale(1); }
+    50% { box-shadow: 0 0 14px rgba(123,184,122,0.9); transform: scale(1.25); }
+  }
+
+  .error-overlay {
+    position: fixed;
+    left: 16px;
+    right: 16px;
+    bottom: 16px;
+    z-index: 9999;
+    display: none;
+    padding: 12px 14px;
+    background: rgba(40, 8, 8, 0.96);
+    border: 1px solid rgba(255, 120, 120, 0.3);
+    color: #ffd7d7;
+    font-family: "JetBrains Mono", monospace;
+    font-size: 11px;
+    line-height: 1.55;
+    white-space: pre-wrap;
+  }
+
+  @media (max-width: 540px) {
+    body { padding: 0; }
+    #app { width: 100%; height: 100vh; border-radius: 0; }
+    .hero { padding-left: 22px; padding-right: 22px; }
+    .theme-preview { top: 58px; right: 18px; max-width: 170px; }
+    .progress-wrap, .queue-panel, .chat-scroll, .composer, .drawer-handle { padding-left: 22px; padding-right: 22px; }
+  }
+</style>
+</head>
+<body>
+<div id="app">
+  <canvas id="weather-canvas"></canvas>
+  <audio id="claudio-audio" style="display:none"></audio>
+
+  <div class="panel-layer">
+    <div class="topbar">CLAUDIO</div>
+
+    <section class="hero">
+      <div class="hero-meta">
+        <div class="hero-time" id="hero-time">00:00</div>
+        <div class="hero-city" id="hero-city"></div>
+        <div class="hero-onair">
+          <span class="hero-onair-dot"></span>
+          ON AIR
+        </div>
+      </div>
+
+      <div class="theme-preview" id="theme-preview">
+        <button type="button" class="theme-chip" data-theme-preview="sunrise" onclick="window.__claudioSetThemePreview('sunrise')">日出</button>
+        <button type="button" class="theme-chip" data-theme-preview="morning" onclick="window.__claudioSetThemePreview('morning')">上午</button>
+        <button type="button" class="theme-chip" data-theme-preview="noon" onclick="window.__claudioSetThemePreview('noon')">正午</button>
+        <button type="button" class="theme-chip" data-theme-preview="sunset" onclick="window.__claudioSetThemePreview('sunset')">落日</button>
+        <button type="button" class="theme-chip" data-theme-preview="night" onclick="window.__claudioSetThemePreview('night')">深夜</button>
+      </div>
+
+      <div class="hero-center">
+        <h1 class="hero-title" id="hero-title">Waiting</h1>
+        <div class="hero-title-rule"></div>
+        <div class="hero-artist" id="hero-artist">Claudio FM</div>
+        <div class="hero-commentary" id="hero-commentary"></div>
+      </div>
+    </section>
+
+    <div class="progress-wrap">
+      <div class="progress-line" id="progress-line">
+        <div class="progress-line-fill" id="progress-fill"></div>
+      </div>
+      <div class="progress-meta">
+        <span id="time-cur">0:00</span>
+        <span id="time-total">0:00</span>
+      </div>
+    </div>
+
+    <div class="controls">
+      <button class="control-btn" id="btn-prev" aria-label="Previous">
+        <svg width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.45" stroke-linecap="round" stroke-linejoin="round">
+          <path d="M17 6L9 12L17 18"></path><path d="M8 6V18"></path>
+        </svg>
+      </button>
+      <button class="control-btn" id="btn-play" aria-label="Play or Pause">
+        <svg id="btn-play-icon" width="24" height="24" viewBox="0 0 24 24" fill="currentColor" stroke="currentColor" stroke-width="1.45" stroke-linecap="round" stroke-linejoin="round">
+          <path d="M9 7L17 12L9 17Z"></path>
+        </svg>
+      </button>
+      <button class="control-btn" id="btn-next" aria-label="Next">
+        <svg width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.45" stroke-linecap="round" stroke-linejoin="round">
+          <path d="M7 6L15 12L7 18"></path><path d="M16 6V18"></path>
+        </svg>
+      </button>
+      <button class="control-btn" id="btn-note" aria-label="Explain">
+        <svg width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.45" stroke-linecap="round" stroke-linejoin="round">
+          <path d="M16 6V14.2C16 15.75 14.66 17 13 17C11.34 17 10 15.75 10 14.2C10 12.65 11.34 11.4 13 11.4C13.56 11.4 14.09 11.54 14.53 11.8V8.3L9 9.6V16.2C9 17.75 7.66 19 6 19C4.34 19 3 17.75 3 16.2C3 14.65 4.34 13.4 6 13.4C6.56 13.4 7.09 13.54 7.53 13.8V8.2L16 6Z"></path>
+        </svg>
+      </button>
+      <button class="control-btn" id="btn-dislike" aria-label="Dislike">
+        <svg width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.45" stroke-linecap="round" stroke-linejoin="round">
+          <path d="M7 7L17 17"></path>
+          <path d="M17 7L7 17"></path>
+        </svg>
+      </button>
+      <button class="control-btn" id="btn-heart" aria-label="Like">
+        <svg width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.45" stroke-linecap="round" stroke-linejoin="round">
+          <path d="M12 19C12 19 4 14.27 4 8.87C4 6.73 5.79 5 7.99 5C9.38 5 10.61 5.71 12 7.02C13.39 5.71 14.62 5 16.01 5C18.21 5 20 6.73 20 8.87C20 14.27 12 19 12 19Z"></path>
+        </svg>
+      </button>
+    </div>
+
+    <section class="drawer" id="drawer">
+      <button class="drawer-handle" id="drawer-toggle" type="button" aria-label="Toggle drawer">
+        <div class="drawer-handle-line">
+          <svg class="drawer-handle-arrow" width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.4" stroke-linecap="round" stroke-linejoin="round">
+            <path d="M8 10L12 14L16 10"></path>
+          </svg>
+        </div>
+      </button>
+
+      <div class="drawer-content">
+        <div class="queue-panel">
+          <div class="queue-head">
+            <span>QUEUE</span>
+            <span id="queue-count">0 TRACKS</span>
+          </div>
+          <div class="queue-list" id="queue-list">
+            <div style="font-size:13px;color:var(--text-sub)">DJ Speak to Claudio to build a queue</div>
+          </div>
+        </div>
+
+        <div class="chat-panel">
+          <div class="chat-scroll" id="chat-scroll">
+            <div class="chat-live">CONNECTED · LIVE</div>
+            <div id="message-list"></div>
+          </div>
+
+          <div class="composer">
+            <input class="composer-input" id="composer-input" placeholder="Say something to the DJ...">
+            <button class="composer-send" id="composer-send" aria-label="Send">
+              <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.4" stroke-linecap="round" stroke-linejoin="round">
+                <path d="M5 12H19"></path>
+                <path d="M13 6L19 12L13 18"></path>
+              </svg>
+            </button>
+          </div>
+        </div>
+      </div>
+    </section>
+  </div>
+
+  <div class="overlay" id="start-overlay">
+    <button class="overlay-button" id="start-button">Tune In</button>
+  </div>
+</div>
+
+<div class="error-overlay" id="error-overlay"></div>
+
+<script>
+(() => {
+  const errorOverlay = document.getElementById('error-overlay')
+
+  function showError(message) {
+    errorOverlay.style.display = 'block'
+    errorOverlay.textContent = String(message || 'Unknown error')
+  }
+
+  window.addEventListener('error', (event) => {
+    showError(`[window.error] ${event.message}\n${event.filename || ''}:${event.lineno || 0}:${event.colno || 0}`)
+  })
+
+  window.addEventListener('unhandledrejection', (event) => {
+    const reason = event.reason && (event.reason.stack || event.reason.message) ? (event.reason.stack || event.reason.message) : String(event.reason)
+    showError(`[promise] ${reason}`)
+  })
+
+  const audio = document.getElementById('claudio-audio')
+  const app = document.getElementById('app')
+  const canvas = document.getElementById('weather-canvas')
+  const ctx = canvas.getContext('2d')
+  const drawer = document.getElementById('drawer')
+  const heroTime = document.getElementById('hero-time')
+  const heroCity = document.getElementById('hero-city')
+  const heroTitle = document.getElementById('hero-title')
+  const heroArtist = document.getElementById('hero-artist')
+  const heroCommentary = document.getElementById('hero-commentary')
+  const progressLine = document.getElementById('progress-line')
+  const progressFill = document.getElementById('progress-fill')
+  const timeCur = document.getElementById('time-cur')
+  const timeTotal = document.getElementById('time-total')
+  const queueCount = document.getElementById('queue-count')
+  const queueList = document.getElementById('queue-list')
+  const messageList = document.getElementById('message-list')
+  const chatScroll = document.getElementById('chat-scroll')
+  const composerInput = document.getElementById('composer-input')
+  const composerSend = document.getElementById('composer-send')
+  const startOverlay = document.getElementById('start-overlay')
+  const startButton = document.getElementById('start-button')
+  const playButton = document.getElementById('btn-play')
+  const playIcon = document.getElementById('btn-play-icon')
+  const noteButton = document.getElementById('btn-note')
+  const dislikeButton = document.getElementById('btn-dislike')
+  const heartButton = document.getElementById('btn-heart')
+  const themePreview = document.getElementById('theme-preview')
+
+  let localQueue = []
+  let commentaryAudio = null
+  let commentaryDucking = null
+  let playedHistory = []
+  let hasUnlockedAudio = false
+  let stationPayload = null
+  let lastPlaylistSignature = null
+  let ws = null
+  let wsReconnectTimer = null
+  let weatherFrameId = null
+  let weatherParticles = []
+  const autoExplainedTracks = new Set()
+  let forcedThemeKey = null
+  let activeExplainToken = 0
+
+  const VISUAL_PHASES = {
+    sunrise: {
+      name: '日出',
+      accent: '#8AAAD4',
+      textMain: '#D8D0E8',
+      textSub: 'rgba(216, 208, 232, 0.68)',
+      textDim: 'rgba(216, 208, 232, 0.34)',
+      line: 'rgba(216, 208, 232, 0.1)',
+      surface: 'rgba(255,255,255,0.02)',
+      surface2: 'rgba(255,255,255,0.04)',
+      bubbleDj: 'rgba(255,255,255,0.04)',
+      bubbleCommentary: 'rgba(255,255,255,0.025)',
+      bubbleYou: 'rgba(138,170,212,0.1)',
+      control: '#7B8AA6',
+      bgStart: '#0D0B14',
+      bgEnd: '#1A120A',
+      bg: '#100D1A',
+      bgGradient: 'linear-gradient(to bottom, #08090F 0%, #0D1018 30%, #141620 60%, #1A1408 100%)',
+    },
+    morning: {
+      name: '上午',
+      accent: '#B8965A',
+      textMain: '#1A1A1A',
+      textSub: '#5A5A5A',
+      textDim: 'rgba(26,26,26,0.42)',
+      line: '#D0CCC8',
+      surface: 'rgba(0,0,0,0.022)',
+      surface2: 'rgba(0,0,0,0.04)',
+      bubbleDj: 'rgba(0,0,0,0.035)',
+      bubbleCommentary: 'rgba(0,0,0,0.025)',
+      bubbleYou: 'rgba(184,150,90,0.08)',
+      control: '#6A6258',
+      bg: '#EEE8DF',
+      bgGradient: 'linear-gradient(to bottom, #C8D8E8 0%, #D8E0E4 20%, #E4DDD4 55%, #EDE4D4 100%)',
+    },
+    noon: {
+      name: '正午',
+      accent: '#A07840',
+      textMain: '#1A1A1A',
+      textSub: '#5A5A5A',
+      textDim: 'rgba(26,26,26,0.42)',
+      line: '#D0CCC8',
+      surface: 'rgba(0,0,0,0.022)',
+      surface2: 'rgba(0,0,0,0.04)',
+      bubbleDj: 'rgba(0,0,0,0.032)',
+      bubbleCommentary: 'rgba(0,0,0,0.024)',
+      bubbleYou: 'rgba(160,120,64,0.08)',
+      control: '#5F5850',
+      bg: '#F0EAD8',
+      bgGradient: 'linear-gradient(to bottom, #F8F8F4 0%, #F4F0E4 30%, #EEE8D8 65%, #E8DFC8 100%)',
+    },
+    sunset: {
+      name: '落日',
+      accent: '#D4845A',
+      textMain: '#F0D9C0',
+      textSub: 'rgba(240,217,192,0.64)',
+      textDim: 'rgba(240,217,192,0.3)',
+      line: 'rgba(240,217,192,0.1)',
+      surface: 'rgba(255,255,255,0.02)',
+      surface2: 'rgba(255,255,255,0.04)',
+      bubbleDj: 'rgba(255,255,255,0.04)',
+      bubbleCommentary: 'rgba(255,255,255,0.025)',
+      bubbleYou: 'rgba(212,132,90,0.1)',
+      control: '#87695A',
+      bg: '#0F0A06',
+      bgGradient: 'linear-gradient(to bottom, #14101E 0%, #2A1A10 25%, #3D1E0A 50%, #1E0E06 75%, #0A0604 100%)',
+    },
+    night: {
+      name: '深夜',
+      accent: '#C9A96E',
+      textMain: '#F0EDE8',
+      textSub: 'rgba(240,237,232,0.52)',
+      textDim: 'rgba(240,237,232,0.28)',
+      line: 'rgba(240,237,232,0.08)',
+      surface: 'rgba(255,255,255,0.025)',
+      surface2: 'rgba(255,255,255,0.04)',
+      bubbleDj: 'rgba(255,255,255,0.04)',
+      bubbleCommentary: 'rgba(255,255,255,0.03)',
+      bubbleYou: 'rgba(201,169,110,0.08)',
+      control: '#5A5A5A',
+      bg: '#080808',
+      bgGradient: 'linear-gradient(to bottom, #0A0A12 0%, #080810 40%, #06060A 70%, #040404 100%)',
+    },
+  }
+
+  const state = {
+    now: new Date(),
+    connected: false,
+    playing: false,
+    progress: 0,
+    duration: 0,
+    volume: 0.75,
+    input: '',
+    queue: [],
+    currentTrack: null,
+    weather: null,
+    sunrise: null,
+    sunset: null,
+    sunriseTs: null,
+    sunsetTs: null,
+    themeKey: 'night',
+    currentFeedback: null,
+    drawerOpen: false,
+    isExplaining: false,
+    isLoading: false,
+    showStartOverlay: false,
+    heroCommentary: '',
+    messages: [
+      { id: makeId('dj'), from: 'dj', text: '跟我说说你想听什么，或者让我来决定。', time: ts() },
+    ],
+  }
+
+  function makeId(prefix) {
+    return `${prefix}-${Date.now()}-${Math.random().toString(16).slice(2)}`
+  }
+
+  function makeTrackExplainKey(item) {
+    if (!item || !item.song_info) return ''
+    const role = item.queue_meta && item.queue_meta.batch_role ? item.queue_meta.batch_role : 'default'
+    return `${item.song_info.id || item.song_info.name}::${role}`
+  }
+
+  function makeTrackKey(track) {
+    if (!track) return ''
+    return `${track.id || track.name}::${track.artist || ''}`
+  }
+
+  function ts(date = new Date()) {
+    return `${String(date.getHours()).padStart(2, '0')}:${String(date.getMinutes()).padStart(2, '0')}`
+  }
+
+  function fmt(sec) {
+    if (!sec || Number.isNaN(sec)) return '0:00'
+    const minutes = Math.floor(sec / 60)
+    const seconds = Math.floor(sec % 60)
+    return `${minutes}:${String(seconds).padStart(2, '0')}`
+  }
+
+  function hhmmToMinutes(text) {
+    if (!text || !/^\d{2}:\d{2}$/.test(text)) return null
+    const parts = text.split(':').map(Number)
+    return parts[0] * 60 + parts[1]
+  }
+
+  function clamp(value, min, max) {
+    return Math.max(min, Math.min(max, value))
+  }
+
+  function hexToRgb(hex) {
+    const value = hex.replace('#', '')
+    const size = value.length === 3 ? 1 : 2
+    const expand = (segment) => size === 1 ? segment + segment : segment
+    return {
+      r: parseInt(expand(value.slice(0, size)), 16),
+      g: parseInt(expand(value.slice(size, size * 2)), 16),
+      b: parseInt(expand(value.slice(size * 2, size * 3)), 16),
+    }
+  }
+
+  function parseColor(color) {
+    if (!color) return { r: 0, g: 0, b: 0, a: 1 }
+    if (color.startsWith('#')) {
+      const rgb = hexToRgb(color)
+      return { ...rgb, a: 1 }
+    }
+    const rgba = color.match(/rgba?\(([^)]+)\)/i)
+    if (!rgba) return { r: 0, g: 0, b: 0, a: 1 }
+    const parts = rgba[1].split(',').map(part => Number(part.trim()))
+    return {
+      r: parts[0] || 0,
+      g: parts[1] || 0,
+      b: parts[2] || 0,
+      a: parts.length > 3 ? parts[3] : 1,
+    }
+  }
+
+  function mixColor(a, b, t) {
+    const c1 = parseColor(a)
+    const c2 = parseColor(b)
+    const mix = (x, y) => x + (y - x) * t
+    return `rgba(${Math.round(mix(c1.r, c2.r))}, ${Math.round(mix(c1.g, c2.g))}, ${Math.round(mix(c1.b, c2.b))}, ${mix(c1.a, c2.a).toFixed(4)})`
+  }
+
+  function getPhaseWindows(nowMs, sunriseTs, sunsetTs) {
+    const defaultSunrise = Math.floor(nowMs / 86400000) * 86400000 / 1000 + 6 * 3600
+    const defaultSunset = Math.floor(nowMs / 86400000) * 86400000 / 1000 + 18 * 3600
+    const sunrise = (sunriseTs || defaultSunrise) * 1000
+    const sunset = (sunsetTs || defaultSunset) * 1000
+
+    return [
+      { key: 'sunrise', start: sunrise - 40 * 60000, end: sunrise + 70 * 60000 },
+      { key: 'morning', start: sunrise + 70 * 60000, end: new Date(nowMs).setHours(11, 30, 0, 0) },
+      { key: 'noon', start: new Date(nowMs).setHours(11, 30, 0, 0), end: new Date(nowMs).setHours(14, 30, 0, 0) },
+      { key: 'sunset', start: new Date(nowMs).setHours(14, 30, 0, 0), end: sunset + 40 * 60000 },
+    ]
+  }
+
+  function resolveThemeKey(now, sunrise, sunset, sunriseTs, sunsetTs) {
+    if (forcedThemeKey) return forcedThemeKey
+    const nowMs = now.getTime()
+    const windows = getPhaseWindows(nowMs, sunriseTs, sunsetTs)
+    const dayPhase = windows.find(window => nowMs >= window.start && nowMs < window.end)
+    return dayPhase ? dayPhase.key : 'night'
+  }
+
+  function getPhaseProgress(phaseKey, nowMs, sunriseTs, sunsetTs) {
+    const windows = getPhaseWindows(nowMs, sunriseTs, sunsetTs)
+    const window = windows.find(item => item.key === phaseKey)
+    if (!window) return 0
+    return clamp((nowMs - window.start) / Math.max(1, window.end - window.start), 0, 1)
+  }
+
+  function getThemeState(themeKey, nowMs) {
+    const theme = VISUAL_PHASES[themeKey] || VISUAL_PHASES.night
+    let bg = theme.bg || '#080808'
+    let bgGradient = theme.bgGradient || null
+    if (themeKey === 'sunrise') {
+      const progress = getPhaseProgress('sunrise', nowMs, state.sunriseTs, state.sunsetTs)
+      bg = mixColor(theme.bgStart, theme.bgEnd, progress)
+      bgGradient = theme.bgGradient || null
+    }
+    return {
+      accent: theme.accent,
+      textMain: theme.textMain,
+      textSub: theme.textSub,
+      textDim: theme.textDim,
+      line: theme.line,
+      surface: theme.surface,
+      surface2: theme.surface2,
+      bubbleDj: theme.bubbleDj,
+      bubbleCommentary: theme.bubbleCommentary,
+      bubbleYou: theme.bubbleYou,
+      control: theme.control,
+      bg,
+      bgGradient,
+    }
+  }
+
+  function getAdjacentThemeKeys(themeKey) {
+    const order = ['night', 'sunrise', 'morning', 'noon', 'sunset', 'night']
+    const index = order.indexOf(themeKey)
+    if (index === -1) return { prev: 'night', next: 'night' }
+    return {
+      prev: order[Math.max(0, index - 1)],
+      next: order[Math.min(order.length - 1, index + 1)],
+    }
+  }
+
+  function getInterpolatedThemeState(nowMs) {
+    const themeKey = resolveThemeKey(new Date(nowMs), state.sunrise, state.sunset, state.sunriseTs, state.sunsetTs)
+    const themeState = getThemeState(themeKey, nowMs)
+    if (forcedThemeKey) return { themeKey, themeState }
+
+    const windows = getPhaseWindows(nowMs, state.sunriseTs, state.sunsetTs)
+    const currentWindow = windows.find(item => item.key === themeKey)
+    if (!currentWindow) return { themeKey, themeState }
+
+    const transitionDuration = 8 * 60000
+    const { prev } = getAdjacentThemeKeys(themeKey)
+    if (nowMs - currentWindow.start < transitionDuration) {
+      const prevState = getThemeState(prev, nowMs)
+      const t = clamp((nowMs - currentWindow.start) / transitionDuration, 0, 1)
+      const keys = Object.keys(themeState).filter(key => key !== 'bgGradient')
+      const blended = { bgGradient: t > 0.5 ? themeState.bgGradient : prevState.bgGradient }
+      for (const key of keys) blended[key] = mixColor(prevState[key], themeState[key], t)
+      return { themeKey, themeState: blended }
+    }
+
+    return { themeKey, themeState }
+  }
+
+  function setTheme(theme) {
+    const root = document.documentElement
+    root.style.setProperty('--bg', theme.bg)
+    root.style.setProperty('--accent', theme.accent)
+    root.style.setProperty('--text-main', theme.textMain)
+    root.style.setProperty('--text-sub', theme.textSub)
+    root.style.setProperty('--text-dim', theme.textDim)
+    root.style.setProperty('--line', theme.line)
+    root.style.setProperty('--surface', theme.surface)
+    root.style.setProperty('--surface-2', theme.surface2)
+    root.style.setProperty('--bubble-dj', theme.bubbleDj)
+    root.style.setProperty('--bubble-commentary', theme.bubbleCommentary)
+    root.style.setProperty('--bubble-you', theme.bubbleYou)
+    root.style.setProperty('--control', theme.control)
+    root.style.setProperty('--control-hover', theme.accent)
+    document.body.style.background = theme.bg
+    app.style.background = theme.bgGradient || theme.bg
+    const fillEl = document.getElementById('progress-fill')
+    if (fillEl) {
+      const themeKey = state.themeKey
+      const gradients = {
+        sunrise: 'linear-gradient(to right, #8A5A3A, #D4956A)',
+        morning: 'linear-gradient(to right, #B8965A, #D4B878)',
+        noon: 'linear-gradient(to right, #A07840, #C09A58)',
+        sunset: 'linear-gradient(to right, #8A3A1A, #D4845A)',
+        night: 'linear-gradient(to right, #4A3A28, #C9A96E)',
+      }
+      fillEl.style.background = gradients[themeKey] || gradients.night
+    }
+    const drawerEl = document.getElementById('drawer')
+    if (drawerEl) {
+      const isLight = ['morning', 'noon'].includes(state.themeKey)
+      drawerEl.style.background = isLight
+        ? 'linear-gradient(to bottom, rgba(248,244,238,0.55), rgba(240,236,228,0.78))'
+        : 'linear-gradient(to bottom, rgba(8,8,12,0.45), rgba(6,6,10,0.72))'
+    }
+  }
+
+  function escapeHtml(text) {
+    return String(text || '')
+      .replace(/&/g, '&amp;')
+      .replace(/</g, '&lt;')
+      .replace(/>/g, '&gt;')
+      .replace(/"/g, '&quot;')
+      .replace(/'/g, '&#39;')
+  }
+
+  function updatePlayIcon() {
+    playIcon.setAttribute('fill', state.playing ? 'none' : 'currentColor')
+    playIcon.innerHTML = state.playing
+      ? '<path d="M9 7V17"></path><path d="M15 7V17"></path>'
+      : '<path d="M9 7L17 12L9 17Z"></path>'
+  }
+
+  function renderHero() {
+    heroTime.textContent = ts(state.now)
+    heroTitle.textContent = state.currentTrack && state.currentTrack.name ? state.currentTrack.name : 'Waiting'
+    const titleLen = heroTitle.textContent.length
+    if (titleLen <= 10) {
+      heroTitle.style.fontSize = 'clamp(38px, 7vw, 52px)'
+      heroTitle.style.lineHeight = '0.94'
+    } else if (titleLen <= 18) {
+      heroTitle.style.fontSize = 'clamp(28px, 5.5vw, 38px)'
+      heroTitle.style.lineHeight = '1.0'
+    } else {
+      heroTitle.style.fontSize = 'clamp(22px, 4.2vw, 30px)'
+      heroTitle.style.lineHeight = '1.1'
+    }
+    heroArtist.textContent = state.currentTrack && state.currentTrack.artist ? state.currentTrack.artist : 'Claudio FM'
+    const city = state.weather && (state.weather.city || state.weather.locationName)
+    heroCity.textContent = city ? String(city).toUpperCase() : ''
+    heroCommentary.textContent = state.heroCommentary || ''
+    heroCommentary.classList.toggle('visible', Boolean(state.heroCommentary))
+  }
+
+  function renderThemePreview() {
+    const buttons = themePreview.querySelectorAll('[data-theme-preview]')
+    buttons.forEach((button) => {
+      button.classList.toggle('active', button.getAttribute('data-theme-preview') === forcedThemeKey)
+    })
+  }
+
+  function applyForcedTheme(nextTheme) {
+    forcedThemeKey = forcedThemeKey === nextTheme ? null : nextTheme
+    const visualTheme = getInterpolatedThemeState(Date.now())
+    state.themeKey = visualTheme.themeKey
+    setTheme(visualTheme.themeState)
+    renderThemePreview()
+  }
+
+  function renderProgress() {
+    const ratio = state.duration ? Math.max(0, Math.min(1, state.progress / state.duration)) : 0
+    progressFill.style.width = `${ratio * 100}%`
+    timeCur.textContent = fmt(state.progress)
+    timeTotal.textContent = fmt(state.duration)
+  }
+
+  function renderQueue() {
+    queueCount.textContent = `${state.queue.length} TRACKS`
+    if (state.queue.length === 0) {
+      queueList.innerHTML = '<div style="font-size:13px;color:var(--text-sub)">DJ Speak to Claudio to build a queue</div>'
+      return
+    }
+    queueList.innerHTML = state.queue.slice(0, 4).map((item, index) => `
+      <button class="queue-item" data-queue-index="${index}">
+        <div class="queue-item-num ${state.currentTrack && item.song_info && (item.song_info.id === state.currentTrack.id || item.song_info.name === state.currentTrack.name) ? 'queue-item-playing' : ''}">${state.currentTrack && item.song_info && (item.song_info.id === state.currentTrack.id || item.song_info.name === state.currentTrack.name) ? '▸' : String(index + 1).padStart(2, '0')}</div>
+        <div>
+          <div class="queue-item-title">${escapeHtml(item.song_info && item.song_info.name ? item.song_info.name : 'Untitled')}</div>
+          <div class="queue-item-artist">${escapeHtml(item.song_info && item.song_info.artist ? item.song_info.artist : '')}</div>
+        </div>
+      </button>
+    `).join('')
+  }
+
+  function renderMessages() {
+    messageList.innerHTML = state.messages.map((message) => {
+      const isYou = message.from === 'user'
+      const commentary = message.kind === 'commentary'
+      return `
+        <div class="msg${isYou ? ' you' : ''}">
+          ${isYou ? `
+            <div class="msg-label"><span>YOU</span></div>
+          ` : `
+            <div class="msg-label">
+              <div class="msg-avatar">${commentary ? '♪' : 'C'}</div>
+              <span>${commentary ? 'CLAUDIO · 讲解' : 'CLAUDIO'}</span>
+            </div>
+          `}
+          <div class="msg-bubble${commentary ? ' msg-commentary' : ''}">${escapeHtml(message.text)}</div>
+          <div class="msg-time">
+            ${escapeHtml(message.time)}
+            ${message.replayUrl ? `<button class="msg-replay" data-replay="${escapeHtml(message.replayUrl)}" data-duck="${commentary ? '1' : '0'}">REPLAY</button>` : ''}
+          </div>
+        </div>
+      `
+    }).join('')
+    chatScroll.scrollTop = chatScroll.scrollHeight
+  }
+
+  function renderControls() {
+    composerInput.disabled = state.isLoading
+    composerSend.disabled = state.isLoading || !composerInput.value.trim()
+    noteButton.disabled = !state.currentTrack || !state.currentTrack.name || state.isExplaining
+    noteButton.style.color = state.isExplaining ? 'var(--accent)' : ''
+    heartButton.style.color = state.currentFeedback === 'like' ? 'var(--accent)' : ''
+    dislikeButton.style.color = state.currentFeedback === 'dislike' ? '#B86A6A' : ''
+    updatePlayIcon()
+  }
+
+  function renderDrawer() {
+    drawer.classList.toggle('open', state.drawerOpen)
+    const arrow = drawer.querySelector('.drawer-handle-arrow')
+    if (arrow) arrow.style.transform = state.drawerOpen ? 'rotate(180deg)' : 'rotate(0deg)'
+  }
+
+  function toggleDrawer() {
+    state.drawerOpen = !state.drawerOpen
+    renderDrawer()
+  }
+
+  function renderOverlay() {
+    startOverlay.classList.toggle('visible', state.showStartOverlay)
+  }
+
+  function renderAll() {
+    renderHero()
+    renderProgress()
+    renderQueue()
+    renderMessages()
+    renderControls()
+    renderDrawer()
+    renderOverlay()
+    renderThemePreview()
+  }
+
+  function setLocalQueue(items) {
+    localQueue = Array.isArray(items) ? items.slice() : []
+    state.queue = localQueue.slice()
+    renderQueue()
+    if (!audio.src && localQueue.length > 0) {
+      state.currentTrack = localQueue[0].song_info || null
+      renderHero()
+      renderControls()
+    }
+  }
+
+  async function sendFeedback(action) {
+    if (!state.currentTrack || !state.currentTrack.name || !state.currentTrack.artist) return
+    try {
+      const response = await fetch('/api/feedback', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          action,
+          song_id: state.currentTrack.id,
+          name: state.currentTrack.name,
+          artist: state.currentTrack.artist,
+        }),
+      })
+      const data = await response.json()
+      if (!response.ok) throw new Error(data.error || 'feedback failed')
+      state.currentFeedback = data.feedback || null
+      renderControls()
+      if (action === 'dislike') {
+        appendDj(`记下了，${state.currentTrack.name} 之后不再推荐。`)
+        advanceToNext()
+      }
+    } catch {
+      appendDj('这次偏好记录失败了，稍后再试。')
+    }
+  }
+
+  async function refreshCurrentFeedback() {
+    if (!state.currentTrack || !state.currentTrack.name || !state.currentTrack.artist) {
+      state.currentFeedback = null
+      renderControls()
+      return
+    }
+    try {
+      const query = new URLSearchParams({
+        song_id: state.currentTrack.id || '',
+        name: state.currentTrack.name,
+        artist: state.currentTrack.artist,
+      })
+      const response = await fetch(`/api/feedback?${query.toString()}`)
+      const data = await response.json()
+      state.currentFeedback = data.feedback || null
+      renderControls()
+    } catch {}
+  }
+
+  function appendMessage(message) {
+    state.messages.push(message)
+    renderMessages()
+  }
+
+  function appendDj(text, audioUrl) {
+    if (!text) return
+    appendMessage({
+      id: makeId('dj'),
+      from: 'dj',
+      text,
+      time: ts(),
+      replayUrl: audioUrl || null,
+    })
+  }
+
+  function appendCommentary(text, audioUrl) {
+    if (!text) return
+    appendMessage({
+      id: makeId('commentary'),
+      kind: 'commentary',
+      from: 'dj',
+      text,
+      time: ts(),
+      replayUrl: audioUrl || null,
+    })
+  }
+
+  function appendUser(text) {
+    appendMessage({ id: makeId('user'), from: 'user', text, time: ts() })
+  }
+
+  function playSong(item, options = {}) {
+    const recordHistory = options.recordHistory !== false
+    const autoExplain = options.autoExplain !== false
+    if (!item || !item.play_url) return
+    activeExplainToken += 1
+    stopVoicePlayback()
+    if (recordHistory && state.currentTrack && state.currentTrack.name && audio.src) {
+      playedHistory.push({ song_info: state.currentTrack, play_url: audio.src })
+      if (playedHistory.length > 30) playedHistory = playedHistory.slice(-30)
+    }
+    audio.src = item.play_url
+    audio.play().then(() => {
+      state.playing = true
+      renderControls()
+    }).catch((error) => {
+      state.playing = false
+      renderControls()
+      appendDj(`播放失败：${error && error.name ? error.name : 'AudioError'}`)
+    })
+    state.currentTrack = item.song_info || null
+    state.progress = 0
+    state.heroCommentary = ''
+    renderHero()
+    renderQueue()
+    renderProgress()
+    if (autoExplain) {
+      maybeAutoExplain(item)
+    }
+  }
+
+  function cleanupVoiceDucking() {
+    if (!commentaryDucking) return
+    audio.volume = commentaryDucking.previous
+    state.volume = commentaryDucking.previous
+    commentaryDucking = null
+  }
+
+  function stopVoicePlayback() {
+    app.classList.remove('dj-speaking')
+    if (!commentaryAudio) return
+    commentaryAudio.pause()
+    commentaryAudio = null
+    cleanupVoiceDucking()
+    state.isExplaining = false
+    renderControls()
+  }
+
+  function ensurePrimaryPlayback() {
+    if (!audio.src) {
+      if (localQueue.length > 0) advanceToNext()
+      return
+    }
+    if (audio.paused) {
+      audio.play().then(() => {
+        state.playing = true
+        renderControls()
+      }).catch((error) => {
+        state.playing = false
+        renderControls()
+        appendDj(`播放失败：${error && error.name ? error.name : 'AudioError'}`)
+      })
+    }
+  }
+
+  function playVoice(url, duckMusic, onFinish) {
+    if (!url) return
+    stopVoicePlayback()
+    const voice = new Audio(url)
+    commentaryAudio = voice
+    if (duckMusic) {
+      const previous = state.volume
+      const lowered = Math.max(0, Math.min(1, previous * 0.7))
+      audio.volume = lowered
+      state.volume = lowered
+      commentaryDucking = { previous }
+      state.isExplaining = true
+      renderControls()
+    }
+
+    function activateSpeaking() {
+      if (commentaryAudio === voice) app.classList.add('dj-speaking')
+    }
+
+    function restore() {
+      if (commentaryAudio === voice) commentaryAudio = null
+      app.classList.remove('dj-speaking')
+      cleanupVoiceDucking()
+      state.isExplaining = false
+      renderControls()
+      if (typeof onFinish === 'function') onFinish()
+    }
+
+    voice.addEventListener('play', activateSpeaking, { once: true })
+    voice.addEventListener('ended', restore, { once: true })
+    voice.addEventListener('error', restore, { once: true })
+    voice.play().then(() => activateSpeaking()).catch(() => restore())
+  }
+
+  async function fetchServerNext() {
+    const response = await fetch('/api/next')
+    const data = await response.json()
+    if (data && data.play_url) {
+      playSong(data)
+      return true
+    }
+    return false
+  }
+
+  async function advanceToNext() {
+    hasUnlockedAudio = true
+    if (localQueue.length > 0) {
+      const next = localQueue.shift()
+      state.queue = localQueue.slice()
+      renderQueue()
+      playSong(next)
+      return
+    }
+    try {
+      await fetchServerNext()
+    } catch {}
+  }
+
+  function playPrevious() {
+    hasUnlockedAudio = true
+    if (state.progress > 3) {
+      audio.currentTime = 0
+      return
+    }
+    const previous = playedHistory.pop()
+    if (!previous) {
+      audio.currentTime = 0
+      return
+    }
+    playSong(previous, { recordHistory: false })
+  }
+
+  async function loadInitialState() {
+    const responses = await Promise.all([fetch('/api/now'), fetch('/api/queue')])
+    const nowData = await responses[0].json()
+    const queueData = await responses[1].json()
+
+    if (nowData.current) {
+      state.currentTrack = {
+        id: nowData.current.song_id,
+        name: nowData.current.song_name,
+        artist: nowData.current.artist,
+      }
+    }
+    state.currentFeedback = nowData.current_feedback || null
+
+    state.weather = nowData.weather || null
+    state.sunrise = nowData.sunrise || null
+    state.sunset = nowData.sunset || null
+    state.sunriseTs = nowData.sunrise_ts || nowData.weather?.sunriseTs || null
+    state.sunsetTs = nowData.sunset_ts || nowData.weather?.sunsetTs || null
+    const visualTheme = getInterpolatedThemeState(Date.now())
+    state.themeKey = visualTheme.themeKey
+    setTheme(visualTheme.themeState)
+    startWeatherSystem(nowData.weather || null)
+
+    if (Array.isArray(queueData.queue)) setLocalQueue(queueData.queue)
+
+    if ((!audio.src || audio.paused) && Array.isArray(queueData.queue) && queueData.queue.length > 0 && !hasUnlockedAudio) {
+      state.showStartOverlay = true
+      renderOverlay()
+    }
+
+    renderAll()
+    if (!state.currentFeedback) refreshCurrentFeedback()
+  }
+
+  function connectWs() {
+    ws = new WebSocket(`ws://${location.host}/stream`)
+
+    ws.onopen = () => {
+      state.connected = true
+    }
+
+    ws.onclose = () => {
+      state.connected = false
+      wsReconnectTimer = setTimeout(connectWs, 3000)
+    }
+
+    ws.onerror = () => {
+      state.connected = false
+      try { ws.close() } catch {}
+    }
+
+    ws.onmessage = (event) => {
+      try {
+        const data = JSON.parse(event.data)
+        if (data.type === 'now-playing' && data.song_info) {
+          state.currentTrack = data.song_info
+          state.currentFeedback = null
+          state.heroCommentary = ''
+          renderHero()
+          renderControls()
+          refreshCurrentFeedback()
+        }
+        if (data.type === 'queue-refresh' && Array.isArray(data.queue)) {
+          setLocalQueue(data.queue)
+        } else if (Array.isArray(data.queue)) {
+          setLocalQueue(data.queue)
+        }
+        if (data.sunrise) state.sunrise = data.sunrise
+        if (data.sunset) state.sunset = data.sunset
+        if (data.sunrise_ts) state.sunriseTs = data.sunrise_ts
+        if (data.sunset_ts) state.sunsetTs = data.sunset_ts
+        if (data.weather) {
+          state.weather = data.weather
+          startWeatherSystem(state.weather)
+          renderHero()
+        }
+        if (data.type === 'playlist-ready') {
+          stationPayload = data
+        }
+        if (data.type === 'playlist-ready' && data.say) {
+          const signature = JSON.stringify({
+            say: data.say,
+            say_audio: data.say_audio || null,
+            queue: Array.isArray(data.queue) ? data.queue.map((item) => item.song_info && item.song_info.id ? item.song_info.id : (item.play_url || '')) : [],
+          })
+          if (lastPlaylistSignature !== signature) {
+            lastPlaylistSignature = signature
+            appendDj(data.say, data.say_audio || null)
+            if (hasUnlockedAudio && !state.showStartOverlay) {
+              ensurePrimaryPlayback()
+              if (data.say_audio) {
+                setTimeout(() => playVoice(data.say_audio, true), audio.src ? 180 : 260)
+              }
+            }
+          }
+        }
+      } catch {}
+    }
+  }
+
+  async function send() {
+    const text = composerInput.value.trim()
+    if (!text || state.isLoading) return
+    hasUnlockedAudio = true
+    state.showStartOverlay = false
+    state.isLoading = true
+    renderOverlay()
+    renderControls()
+    appendUser(text)
+    composerInput.value = ''
+    renderControls()
+
+    try {
+      const response = await fetch('/api/chat', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ input: text }),
+      })
+      const data = await response.json()
+      if (Array.isArray(data.queue)) setLocalQueue(data.queue)
+      if (data.say) appendDj(data.say, data.say_audio || null)
+      ensurePrimaryPlayback()
+      if (data.say_audio) {
+        setTimeout(() => playVoice(data.say_audio, true), audio.src ? 180 : 260)
+      }
+    } catch {
+      appendDj('出了点问题，稍后再试。')
+    } finally {
+      state.isLoading = false
+      renderControls()
+    }
+  }
+
+  async function explainCurrentTrack() {
+    return explainTrack(state.currentTrack, {})
+  }
+
+  async function explainTrack(track, options = {}) {
+    const {
+      userInput = '无',
+      suppressFailureBubble = false,
+    } = options
+
+    if (!track || !track.name || !track.artist || state.isExplaining) return
+    const requestToken = ++activeExplainToken
+    const requestedTrackKey = makeTrackKey(track)
+    hasUnlockedAudio = true
+    state.showStartOverlay = false
+    renderOverlay()
+    try {
+      const response = await fetch('/api/explain', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          name: track.name,
+          artist: track.artist,
+          theme_name: VISUAL_PHASES[state.themeKey].name,
+          user_input: userInput,
+        }),
+      })
+      const data = await response.json()
+      if (!response.ok) throw new Error(data.error || 'Explain failed')
+      if (requestToken !== activeExplainToken) return
+      if (requestedTrackKey !== makeTrackKey(state.currentTrack)) return
+      state.heroCommentary = data.explain_text || ''
+      renderHero()
+      appendCommentary(data.explain_text, data.say_audio || null)
+      if (data.say_audio) playVoice(data.say_audio, true)
+    } catch {
+      if (requestToken !== activeExplainToken) return
+      if (!suppressFailureBubble) appendDj('这段讲解暂时没生成出来。')
+      state.isExplaining = false
+      renderControls()
+    }
+  }
+
+  function maybeAutoExplain(item) {
+    if (!hasUnlockedAudio || state.isExplaining || !item || !item.song_info) return
+    const role = item.queue_meta && item.queue_meta.batch_role
+    if (role !== 'first' && role !== 'last') return
+
+    const explainKey = makeTrackExplainKey(item)
+    if (!explainKey || autoExplainedTracks.has(explainKey)) return
+    autoExplainedTracks.add(explainKey)
+
+    const themeName = VISUAL_PHASES[state.themeKey] ? VISUAL_PHASES[state.themeKey].name : ''
+    let userInput = '无'
+
+    if (role === 'first' && (themeName === '日出' || themeName === '上午')) {
+      userInput = '这是今天最早开始的一首歌，如果自然的话，用一句轻一点的早上好带入。'
+    } else if (role === 'last' && themeName === '深夜') {
+      userInput = '这是这一批里最晚的一首歌，如果自然的话，用一句很轻的晚安收尾。'
+    } else if (role === 'first') {
+      userInput = '这是这一批里最早开始播放的一首歌，请自然开场。'
+    } else if (role === 'last') {
+      userInput = '这是这一批里最晚播放的一首歌，请自然收束一下情绪。'
+    }
+
+    setTimeout(() => {
+      explainTrack(item.song_info, {
+        userInput,
+        suppressFailureBubble: true,
+      })
+    }, 1200)
+  }
+
+  function togglePlay() {
+    hasUnlockedAudio = true
+    state.showStartOverlay = false
+    renderOverlay()
+    if (commentaryAudio && !audio.src && localQueue.length > 0) {
+      stopVoicePlayback()
+    }
+    if (!audio.src) {
+      advanceToNext()
+      return
+    }
+    if (audio.paused) audio.play().catch(() => {})
+    else audio.pause()
+  }
+
+  function seekTo(event) {
+    if (!state.duration) return
+    const rect = event.currentTarget.getBoundingClientRect()
+    audio.currentTime = ((event.clientX - rect.left) / rect.width) * state.duration
+  }
+
+  function pickQueue(index) {
+    hasUnlockedAudio = true
+    state.showStartOverlay = false
+    renderOverlay()
+    const picked = localQueue[index]
+    if (!picked) return
+    const nextQueue = localQueue.filter((_, idx) => idx !== index)
+    localQueue = nextQueue
+    state.queue = nextQueue.slice()
+    renderQueue()
+    playSong(picked)
+  }
+
+  function startListening() {
+    hasUnlockedAudio = true
+    state.showStartOverlay = false
+    renderOverlay()
+    ensurePrimaryPlayback()
+    if (stationPayload && stationPayload.say_audio) {
+      setTimeout(() => playVoice(stationPayload.say_audio, true), audio.src ? 180 : 260)
+      return
+    }
+    ensurePrimaryPlayback()
+  }
+
+  const visualState = {
+    width: 0,
+    height: 0,
+    dpr: 1,
+    phaseSeeds: {},
+    currentWeatherProfile: null,
+    previousWeatherProfile: null,
+    weatherTransitionStart: 0,
+    weatherSignature: '',
+    lastFrameAt: 0,
+    lastClockSecond: '',
+    lastWeatherFetchAt: 0,
+    fetchingAmbient: false,
+    flashUntil: 0,
+  }
+
+  function rand(min, max) {
+    return min + Math.random() * (max - min)
+  }
+
+  function resizeCanvas() {
+    const rect = app.getBoundingClientRect()
+    const dpr = window.devicePixelRatio || 1
+    visualState.width = rect.width
+    visualState.height = rect.height
+    visualState.dpr = dpr
+    canvas.width = rect.width * dpr
+    canvas.height = rect.height * dpr
+    canvas.style.width = `${rect.width}px`
+    canvas.style.height = `${rect.height}px`
+    ctx.setTransform(dpr, 0, 0, dpr, 0, 0)
+    initPhaseSeeds()
+    if (state.weather) startWeatherSystem(state.weather, true)
+  }
+
+  function initPhaseSeeds() {
+    const width = visualState.width
+    const height = visualState.height
+    visualState.phaseSeeds = {
+      morningGlows: Array.from({ length: 5 }, () => ({
+        x: rand(width * 0.05, width * 0.95),
+        y: rand(height * 0.05, height * 0.6),
+        vx: rand(0.06, 0.14) * (Math.random() < 0.5 ? 1 : -1),
+        vy: rand(0.04, 0.1) * (Math.random() < 0.5 ? 1 : -1),
+        radius: rand(width * 0.18, width * 0.32),
+        hue: rand(30, 55),
+        alpha: rand(0.06, 0.11),
+      })),
+      noonRays: Array.from({ length: 4 }, (_, index) => ({
+        x: width * (0.15 + index * 0.22),
+        baseAlpha: rand(0.04, 0.08),
+        phase: rand(0, Math.PI * 2),
+        speed: rand(3000, 6000),
+      })),
+      nightGlows: Array.from({ length: 3 }, () => ({
+        x: rand(width * 0.1, width * 0.9),
+        y: rand(height * 0.05, height * 0.55),
+        vx: rand(0.03, 0.08) * (Math.random() < 0.5 ? 1 : -1),
+        vy: rand(0.02, 0.06) * (Math.random() < 0.5 ? 1 : -1),
+        radius: rand(width * 0.22, width * 0.38),
+        color: Math.random() < 0.6 ? '#1A2A4A' : '#2A1A08',
+        alpha: rand(0.18, 0.28),
+      })),
+      nightClouds: Array.from({ length: 3 }, (_, index) => ({
+        x: rand(-width * 0.2, width * 0.5),
+        y: height * (0.16 + index * 0.14),
+        w: rand(width * 0.3, width * 0.48),
+        h: rand(height * 0.08, height * 0.14),
+        speed: rand(0.1, 0.2),
+        alpha: rand(0.08, 0.12),
+        seed: Math.random() * Math.PI * 2,
+      })),
+    }
+  }
+
+  function drawBlobCloud(cloud, alphaScale) {
+    const segments = 4
+    for (let i = 0; i < segments; i += 1) {
+      const offsetX = (i - 1.5) * cloud.w * 0.18
+      const offsetY = Math.sin(cloud.seed + i) * cloud.h * 0.08
+      ctx.beginPath()
+      ctx.fillStyle = `rgba(26, 26, 26, ${(cloud.alpha * alphaScale).toFixed(4)})`
+      ctx.ellipse(cloud.x + offsetX, cloud.y + offsetY, cloud.w * (0.26 + i * 0.03), cloud.h * (0.58 + (i % 2) * 0.08), 0, 0, Math.PI * 2)
+      ctx.fill()
+    }
+  }
+
+  function makeRainParticles(count, color) {
+    return Array.from({ length: count }, () => ({
+      x: rand(0, visualState.width),
+      y: rand(-visualState.height, visualState.height),
+      len: rand(10, 16),
+      speed: rand(4, 7),
+      alpha: rand(0.1, 0.2),
+      color,
+    }))
+  }
+
+  function makeSnowParticles(count) {
+    return Array.from({ length: count }, () => ({
+      x: rand(0, visualState.width),
+      y: rand(-visualState.height, visualState.height),
+      size: rand(1, 3),
+      speed: rand(0.8, 1.5),
+      alpha: rand(0.25, 0.5),
+      driftSeed: Math.random() * Math.PI * 2,
+    }))
+  }
+
+  function makeSparkParticles(count, mode) {
+    return Array.from({ length: count }, () => ({
+      x: rand(visualState.width * 0.2, visualState.width * 0.8),
+      y: rand(visualState.height * 0.42, visualState.height * 0.92),
+      size: mode === 'sunset' ? rand(1.5, 3) : rand(4, 8),
+      speed: mode === 'day' ? rand(0.18, 0.22) : rand(0.24, 0.32),
+      alpha: mode === 'sunset' ? rand(0.22, 0.34) : rand(0.18, 0.28),
+    }))
+  }
+
+  function makeStars(count) {
+    return Array.from({ length: count }, () => ({
+      x: rand(0, visualState.width),
+      y: rand(0, visualState.height * 0.45),
+      baseAlpha: rand(0.15, 0.4),
+      period: rand(3000, 7000),
+      phase: Math.random() * Math.PI * 2,
+    }))
+  }
+
+  function makeSandParticles(count) {
+    return Array.from({ length: count }, () => ({
+      x: rand(-visualState.width, visualState.width),
+      y: rand(0, visualState.height),
+      len: rand(2, 4),
+      speed: rand(8, 12),
+      alpha: rand(0.1, 0.2),
+    }))
+  }
+
+  function makeCloudOverlay(count, alphaMin, alphaMax) {
+    return Array.from({ length: count }, (_, index) => ({
+      x: rand(-visualState.width * 0.2, visualState.width * 0.7),
+      y: visualState.height * (0.16 + index * 0.12),
+      w: rand(visualState.width * 0.32, visualState.width * 0.5),
+      h: rand(visualState.height * 0.08, visualState.height * 0.14),
+      speed: rand(0.06, 0.12),
+      alpha: rand(alphaMin, alphaMax),
+      seed: Math.random() * Math.PI * 2,
+    }))
+  }
+
+  function getWeatherSignature(weather) {
+    if (!weather) return 'none'
+    return [
+      weather.main || '',
+      weather.description || '',
+      weather.cloudiness ?? '',
+    ].join('|')
+  }
+
+  function createWeatherProfile(weather) {
+    const main = weather?.main || 'Clear'
+    const description = weather?.description || ''
+    const cloudiness = typeof weather?.cloudiness === 'number' ? weather.cloudiness : null
+    const themeKey = state.themeKey
+    const profile = {
+      main,
+      description,
+      cloudiness,
+      hazeFilter: '',
+      particles: [],
+      snow: [],
+      stars: [],
+      clouds: [],
+      fog: null,
+      overlayColor: null,
+      kind: 'none',
+      count: 0,
+    }
+
+    if (main === 'Clear') {
+      profile.kind = 'clear'
+      if (themeKey === 'night') {
+        profile.stars = makeStars(10)
+        profile.count = profile.stars.length
+      } else if (themeKey === 'sunset') {
+        profile.particles = makeSparkParticles(3, 'sunset')
+        profile.count = profile.particles.length
+      } else {
+        profile.particles = makeSparkParticles(themeKey === 'sunrise' ? 3 : 4, 'day')
+        profile.count = profile.particles.length
+      }
+      return profile
+    }
+
+    if (main === 'Clouds') {
+      profile.kind = 'clouds'
+      if ((cloudiness ?? 100) < 50) {
+        profile.clouds = makeCloudOverlay(2, 0.05, 0.05)
+        if (themeKey === 'night') profile.stars = makeStars(8)
+        else profile.particles = makeSparkParticles(3, themeKey === 'sunset' ? 'sunset' : 'day')
+      } else {
+        profile.clouds = makeCloudOverlay(4, 0.1, 0.15)
+      }
+      profile.count = profile.clouds.length + profile.particles.length + profile.stars.length
+      return profile
+    }
+
+    if (main === 'Rain' || main === 'Drizzle' || main === 'Thunderstorm') {
+      const isHeavy = /大雨|暴雨|heavy|storm/i.test(description)
+      const isMid = /中雨|moderate/i.test(description)
+      const count = main === 'Thunderstorm' ? 120 : isHeavy ? 120 : isMid ? 80 : 40
+      const color = themeKey === 'night' ? '#6A8AA0' : themeKey === 'sunrise' ? '#A09080' : '#8AAABB'
+      profile.kind = main === 'Thunderstorm' ? 'storm' : 'rain'
+      profile.particles = makeRainParticles(count, color)
+      profile.count = profile.particles.length
+      return profile
+    }
+
+    if (main === 'Snow') {
+      profile.kind = 'snow'
+      profile.snow = makeSnowParticles(60)
+      profile.count = profile.snow.length
+      return profile
+    }
+
+    if (main === 'Mist' || main === 'Fog') {
+      profile.kind = 'fog'
+      profile.fog = { color: (themeKey === 'night' || themeKey === 'sunset') ? '#1A1A1A' : '#D0D0D0' }
+      return profile
+    }
+
+    if (main === 'Haze') {
+      profile.kind = 'haze'
+      profile.overlayColor = themeKey === 'night' ? 'rgba(42,32,16,0.12)' : 'rgba(200,176,144,0.12)'
+      profile.hazeFilter = 'sepia(0.1) saturate(0.8)'
+      return profile
+    }
+
+    if (main === 'Dust' || main === 'Sand') {
+      profile.kind = 'dust'
+      profile.overlayColor = 'rgba(138,90,32,0.15)'
+      profile.particles = makeSandParticles(40)
+      profile.count = profile.particles.length
+      return profile
+    }
+
+    if (main === 'Sleet') {
+      profile.kind = 'sleet'
+      profile.particles = makeRainParticles(40, '#8AAABB')
+      profile.snow = makeSnowParticles(30)
+      profile.count = profile.particles.length + profile.snow.length
+      return profile
+    }
+
+    return profile
+  }
+
+  function startWeatherSystem(weather, immediate = false) {
+    const signature = getWeatherSignature(weather)
+    if (!immediate && signature === visualState.weatherSignature) return
+    visualState.previousWeatherProfile = immediate ? null : visualState.currentWeatherProfile
+    visualState.currentWeatherProfile = createWeatherProfile(weather)
+    visualState.weatherTransitionStart = performance.now()
+    visualState.weatherSignature = signature
+    canvas.style.filter = visualState.currentWeatherProfile?.hazeFilter || 'none'
+  }
+
+  function drawRadialGlow(x, y, radius, color, alpha) {
+    const gradient = ctx.createRadialGradient(x, y, 0, x, y, radius)
+    const c = parseColor(color)
+    gradient.addColorStop(0, `rgba(${c.r}, ${c.g}, ${c.b}, ${alpha.toFixed(4)})`)
+    gradient.addColorStop(1, `rgba(${c.r}, ${c.g}, ${c.b}, 0)`)
+    ctx.fillStyle = gradient
+    ctx.fillRect(0, 0, visualState.width, visualState.height)
+  }
+
+  function drawPhaseBase(nowMs, phaseKey, alphaScale = 1) {
+    const width = visualState.width
+    const height = visualState.height
+    const phaseProgress = getPhaseProgress(phaseKey, nowMs, state.sunriseTs, state.sunsetTs)
+
+    if (phaseKey === 'sunrise') {
+      drawRadialGlow(width * 0.5, 0, width * 0.7, '#3A5A8A', (0.18 + Math.sin(nowMs / 14000 * Math.PI * 2) * 0.05) * alphaScale)
+      drawRadialGlow(width * 0.5, height, width * (0.4 + 0.25 * phaseProgress), '#C87840', (0.14 + phaseProgress * 0.12) * alphaScale)
+      return
+    }
+
+    if (phaseKey === 'morning') {
+      visualState.phaseSeeds.morningGlows.forEach((spot) => {
+        spot.x += spot.vx
+        spot.y += spot.vy
+        if (spot.x < -spot.radius || spot.x > width + spot.radius) spot.vx *= -1
+        if (spot.y < -spot.radius || spot.y > height * 0.72 + spot.radius) spot.vy *= -1
+        const grad = ctx.createRadialGradient(spot.x, spot.y, 0, spot.x, spot.y, spot.radius)
+        const alpha = spot.alpha * alphaScale
+        grad.addColorStop(0, `hsla(${spot.hue}, 60%, 92%, ${alpha.toFixed(4)})`)
+        grad.addColorStop(0.5, `hsla(${spot.hue}, 40%, 88%, ${(alpha * 0.5).toFixed(4)})`)
+        grad.addColorStop(1, `hsla(${spot.hue}, 30%, 85%, 0)`)
+        ctx.fillStyle = grad
+        ctx.fillRect(0, 0, width, height)
+      })
+      const sunGrad = ctx.createRadialGradient(width * 0.88, 0, 0, width * 0.88, 0, width * 0.65)
+      sunGrad.addColorStop(0, `rgba(255, 230, 180, ${(0.1 * alphaScale).toFixed(4)})`)
+      sunGrad.addColorStop(1, 'rgba(255, 230, 180, 0)')
+      ctx.fillStyle = sunGrad
+      ctx.fillRect(0, 0, width, height)
+      return
+    }
+
+    if (phaseKey === 'noon') {
+      const zenithAlpha = (0.18 + Math.sin(nowMs / 8000 * Math.PI * 2) * 0.06) * alphaScale
+      drawRadialGlow(width * 0.5, -height * 0.1, width * 0.65, '#FFFFFF', zenithAlpha)
+      drawRadialGlow(width * 0.5, height * 1.05, width * 0.5, '#E8D0A0', 0.10 * alphaScale)
+      visualState.phaseSeeds.noonRays.forEach((ray) => {
+        const pulse = 0.5 + 0.5 * Math.sin(nowMs / ray.speed * Math.PI * 2 + ray.phase)
+        const alpha = (ray.baseAlpha * 1.6 * pulse) * alphaScale
+        const grad = ctx.createLinearGradient(ray.x, 0, ray.x, height * 0.6)
+        grad.addColorStop(0, `rgba(255, 252, 235, ${alpha.toFixed(4)})`)
+        grad.addColorStop(0.5, `rgba(255, 248, 220, ${(alpha * 0.45).toFixed(4)})`)
+        grad.addColorStop(1, 'rgba(255, 248, 220, 0)')
+        ctx.fillStyle = grad
+        const rayWidth = width * 0.18
+        ctx.fillRect(ray.x - rayWidth / 2, 0, rayWidth, height * 0.6)
+      })
+      return
+    }
+
+    if (phaseKey === 'sunset') {
+      const sunsetStart = state.sunsetTs ? state.sunsetTs * 1000 : nowMs
+      const postSunsetProgress = nowMs > sunsetStart
+        ? clamp((nowMs - sunsetStart) / (40 * 60000), 0, 1)
+        : 0
+      const centerX = width * (0.92 - 0.3 * phaseProgress)
+      const centerY = height * 0.84
+      const color = mixColor('#D4845A', '#8A3A1A', postSunsetProgress)
+      const alpha = (0.32 + Math.sin(nowMs / 10000 * Math.PI * 2) * 0.06) * (1 - postSunsetProgress * 0.5) * alphaScale
+      drawRadialGlow(centerX, centerY, width * 0.9, color, alpha)
+      drawRadialGlow(width * 0.3, height * 0.1, width * 0.7, '#4A2060', 0.14 * (1 - postSunsetProgress * 0.4) * alphaScale)
+      return
+    }
+
+    if (phaseKey === 'night') {
+      visualState.phaseSeeds.nightGlows.forEach((glow) => {
+        glow.x += glow.vx
+        glow.y += glow.vy
+        if (glow.x < -glow.radius || glow.x > width + glow.radius) glow.vx *= -1
+        if (glow.y < -glow.radius || glow.y > height * 0.65 + glow.radius) glow.vy *= -1
+        const c = parseColor(glow.color)
+        const grad = ctx.createRadialGradient(glow.x, glow.y, 0, glow.x, glow.y, glow.radius)
+        const alpha = glow.alpha * alphaScale
+        grad.addColorStop(0, `rgba(${c.r}, ${c.g}, ${c.b}, ${alpha.toFixed(4)})`)
+        grad.addColorStop(0.6, `rgba(${c.r}, ${c.g}, ${c.b}, ${(alpha * 0.3).toFixed(4)})`)
+        grad.addColorStop(1, `rgba(${c.r}, ${c.g}, ${c.b}, 0)`)
+        ctx.fillStyle = grad
+        ctx.fillRect(0, 0, width, height)
+      })
+      const bandGrad = ctx.createLinearGradient(0, height * 0.55, 0, height * 0.78)
+      bandGrad.addColorStop(0, 'rgba(40, 28, 12, 0)')
+      bandGrad.addColorStop(0.5, `rgba(40, 28, 12, ${(0.1 * alphaScale).toFixed(4)})`)
+      bandGrad.addColorStop(1, 'rgba(40, 28, 12, 0)')
+      ctx.fillStyle = bandGrad
+      ctx.fillRect(0, height * 0.55, width, height * 0.23)
+      visualState.phaseSeeds.nightClouds.forEach((cloud) => {
+        cloud.x += cloud.speed
+        if (cloud.x - cloud.w > width) {
+          cloud.x = -cloud.w
+          cloud.y = rand(height * 0.14, height * 0.52)
+        }
+        drawBlobCloud(cloud, alphaScale)
+      })
+    }
+  }
+
+  function drawWeatherOverlay(profile, nowMs, alphaScale = 1) {
+    if (!profile || alphaScale <= 0) return
+    const width = visualState.width
+    const height = visualState.height
+    ctx.save()
+    ctx.globalAlpha = alphaScale
+
+    if (profile.clouds.length) {
+      profile.clouds.forEach((cloud) => {
+        cloud.x += cloud.speed
+        if (cloud.x - cloud.w > width) cloud.x = -cloud.w
+        drawBlobCloud(cloud, 1)
+      })
+    }
+
+    if (profile.overlayColor) {
+      ctx.fillStyle = profile.overlayColor
+      ctx.fillRect(0, 0, width, height)
+    }
+
+    if (profile.particles.length) {
+      if (profile.kind === 'rain' || profile.kind === 'storm') {
+        ctx.lineWidth = 1
+        profile.particles.forEach((drop) => {
+          ctx.strokeStyle = drop.color
+          ctx.globalAlpha = drop.alpha * alphaScale
+          ctx.beginPath()
+          ctx.moveTo(drop.x, drop.y)
+          ctx.lineTo(drop.x + 1, drop.y + drop.len)
+          ctx.stroke()
+          drop.y += drop.speed
+          drop.x += 0.35
+          if (drop.y > height) {
+            drop.y = -drop.len
+            drop.x = rand(0, width)
+          }
+        })
+        if (profile.kind === 'storm' && nowMs > visualState.flashUntil && Math.random() < 0.001) {
+          visualState.flashUntil = nowMs + 100
+        }
+      } else if (profile.kind === 'dust') {
+        profile.particles.forEach((grain) => {
+          ctx.fillStyle = `rgba(192, 144, 80, ${grain.alpha.toFixed(4)})`
+          ctx.fillRect(grain.x, grain.y, grain.len, 1)
+          grain.x += grain.speed
+          if (grain.x > width + 8) {
+            grain.x = -8
+            grain.y = rand(0, height)
+          }
+        })
+      } else {
+        profile.particles.forEach((spark) => {
+          ctx.beginPath()
+          ctx.fillStyle = profile.kind === 'clear' && state.themeKey === 'sunset'
+            ? `rgba(255, 208, 128, ${(spark.alpha * alphaScale).toFixed(4)})`
+            : `rgba(240, 192, 128, ${(spark.alpha * alphaScale).toFixed(4)})`
+          ctx.arc(spark.x, spark.y, spark.size, 0, Math.PI * 2)
+          ctx.fill()
+          spark.y -= spark.speed
+          if (state.themeKey === 'sunset') {
+            spark.x += Math.sin(nowMs / 5000 + spark.y) * 0.08
+          }
+          if (spark.y < height * 0.4) {
+            spark.y = rand(height * 0.65, height * 0.94)
+            spark.x = rand(width * 0.2, width * 0.82)
+          }
+        })
+      }
+    }
+
+    if (profile.snow.length) {
+      profile.snow.forEach((flake, index) => {
+        ctx.beginPath()
+        ctx.fillStyle = `rgba(240,240,240,${(flake.alpha * alphaScale).toFixed(4)})`
+        ctx.arc(flake.x, flake.y, flake.size, 0, Math.PI * 2)
+        ctx.fill()
+        flake.y += flake.speed
+        flake.x += Math.sin(nowMs / 1000 + flake.driftSeed + index) * 0.08
+        if (flake.y > height + 4) {
+          flake.y = -4
+          flake.x = rand(0, width)
+        }
+      })
+    }
+
+    if (profile.stars.length) {
+      profile.stars.forEach((star) => {
+        const twinkle = 0.5 + 0.5 * Math.sin(nowMs / star.period * Math.PI * 2 + star.phase)
+        ctx.fillStyle = `rgba(255,255,255,${(star.baseAlpha * twinkle * alphaScale).toFixed(4)})`
+        ctx.fillRect(star.x, star.y, 1.2, 1.2)
+      })
+    }
+
+    if (profile.kind === 'fog') {
+      const fogAlpha = 0.1 + Math.sin(nowMs / 15000 * Math.PI * 2) * 0.04
+      const corners = [
+        [0, 0],
+        [width, 0],
+        [0, height],
+        [width, height],
+      ]
+      corners.forEach(([x, y]) => {
+        const gradient = ctx.createRadialGradient(x, y, 0, width * 0.5, height * 0.5, width * 0.75)
+        const c = parseColor(profile.fog.color)
+        gradient.addColorStop(0, `rgba(${c.r}, ${c.g}, ${c.b}, ${(fogAlpha * alphaScale).toFixed(4)})`)
+        gradient.addColorStop(1, `rgba(${c.r}, ${c.g}, ${c.b}, 0)`)
+        ctx.fillStyle = gradient
+        ctx.fillRect(0, 0, width, height)
+      })
+    }
+
+    if (profile.kind === 'haze') {
+      ctx.fillStyle = profile.overlayColor
+      ctx.fillRect(0, 0, width, height)
+    }
+
+    if (visualState.flashUntil > nowMs) {
+      ctx.fillStyle = 'rgba(255,255,255,0.08)'
+      ctx.fillRect(0, 0, width, height)
+    }
+
+    ctx.restore()
+  }
+
+  async function refreshAmbientNow(force = false) {
+    if (visualState.fetchingAmbient) return
+    const nowMs = Date.now()
+    if (!force && nowMs - visualState.lastWeatherFetchAt < 30 * 60000) return
+    visualState.fetchingAmbient = true
+    try {
+      const response = await fetch('/api/now')
+      const data = await response.json()
+      if (data.weather) {
+        state.weather = data.weather
+        state.sunrise = data.sunrise || data.weather.sunrise || null
+        state.sunset = data.sunset || data.weather.sunset || null
+        state.sunriseTs = data.sunrise_ts || data.weather.sunriseTs || null
+        state.sunsetTs = data.sunset_ts || data.weather.sunsetTs || null
+        startWeatherSystem(data.weather)
+        renderHero()
+      }
+      visualState.lastWeatherFetchAt = nowMs
+    } catch {}
+    finally {
+      visualState.fetchingAmbient = false
+    }
+  }
+
+  function startVisualLoop(timestamp) {
+    if (!visualState.lastFrameAt) visualState.lastFrameAt = timestamp
+    const profileCount = (visualState.currentWeatherProfile?.count || 0) + (visualState.previousWeatherProfile?.count || 0)
+    const minFrameGap = profileCount > 200 ? 33 : 16
+    if (timestamp - visualState.lastFrameAt < minFrameGap) {
+      weatherFrameId = requestAnimationFrame(startVisualLoop)
+      return
+    }
+    visualState.lastFrameAt = timestamp
+
+    const nowMs = Date.now()
+    const clockStamp = ts(new Date(nowMs))
+    if (visualState.lastClockSecond !== clockStamp) {
+      visualState.lastClockSecond = clockStamp
+      state.now = new Date(nowMs)
+      renderHero()
+    }
+
+    const themed = getInterpolatedThemeState(nowMs)
+    state.themeKey = themed.themeKey
+    setTheme(themed.themeState)
+    renderThemePreview()
+
+    ctx.clearRect(0, 0, visualState.width, visualState.height)
+    drawPhaseBase(nowMs, state.themeKey, 1)
+
+    let currentAlpha = 1
+    if (visualState.previousWeatherProfile) {
+      const transitionProgress = clamp((timestamp - visualState.weatherTransitionStart) / 3000, 0, 1)
+      drawWeatherOverlay(visualState.previousWeatherProfile, nowMs, 1 - transitionProgress)
+      currentAlpha = transitionProgress
+      if (transitionProgress >= 1) visualState.previousWeatherProfile = null
+    }
+    drawWeatherOverlay(visualState.currentWeatherProfile, nowMs, currentAlpha)
+
+    if (nowMs - visualState.lastWeatherFetchAt >= 30 * 60000) {
+      refreshAmbientNow()
+    }
+
+    weatherFrameId = requestAnimationFrame(startVisualLoop)
+  }
+
+  document.getElementById('btn-prev').addEventListener('click', playPrevious)
+  document.getElementById('btn-next').addEventListener('click', advanceToNext)
+  document.getElementById('btn-note').addEventListener('click', explainCurrentTrack)
+  document.getElementById('btn-dislike').addEventListener('click', () => sendFeedback('dislike'))
+  document.getElementById('btn-heart').addEventListener('click', () => sendFeedback('like'))
+  const drawerToggle = document.getElementById('drawer-toggle')
+  drawerToggle.addEventListener('click', (event) => {
+    event.preventDefault()
+    event.stopPropagation()
+    toggleDrawer()
+  })
+  playButton.addEventListener('click', togglePlay)
+  composerSend.addEventListener('click', send)
+  composerInput.addEventListener('input', renderControls)
+  composerInput.addEventListener('keydown', (event) => {
+    if (event.key === 'Enter' && !event.shiftKey) {
+      event.preventDefault()
+      send()
+    }
+  })
+  startButton.addEventListener('click', startListening)
+  progressLine.addEventListener('click', seekTo)
+  queueList.addEventListener('click', (event) => {
+    const button = event.target.closest('[data-queue-index]')
+    if (!button) return
+    pickQueue(Number(button.getAttribute('data-queue-index')))
+  })
+  messageList.addEventListener('click', (event) => {
+    const replay = event.target.closest('[data-replay]')
+    if (!replay) return
+    playVoice(replay.getAttribute('data-replay'), replay.getAttribute('data-duck') === '1')
+  })
+  window.__claudioSetThemePreview = applyForcedTheme
+  window.addEventListener('resize', resizeCanvas)
+
+  audio.volume = state.volume
+  audio.addEventListener('timeupdate', () => {
+    state.progress = audio.currentTime || 0
+    state.duration = audio.duration || 0
+    renderProgress()
+  })
+  audio.addEventListener('play', () => {
+    state.playing = true
+    renderControls()
+  })
+  audio.addEventListener('pause', () => {
+    state.playing = false
+    renderControls()
+  })
+  audio.addEventListener('ended', () => {
+    advanceToNext()
+  })
+
+  if ('serviceWorker' in navigator) {
+    navigator.serviceWorker.register('/sw.js').catch(() => {})
+  }
+
+  if (navigator.geolocation) {
+    navigator.geolocation.getCurrentPosition(
+      async (position) => {
+        try {
+          await fetch('/api/location', {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({
+              lat: position.coords.latitude,
+              lon: position.coords.longitude,
+            }),
+          })
+          await loadInitialState()
+        } catch {}
+      },
+      () => {},
+      {
+        enableHighAccuracy: false,
+        timeout: 8000,
+        maximumAge: 15 * 60 * 1000,
+      }
+    )
+  }
+
+  resizeCanvas()
+  const initialTheme = getInterpolatedThemeState(Date.now())
+  state.themeKey = initialTheme.themeKey
+  setTheme(initialTheme.themeState)
+  renderAll()
+  startWeatherSystem(state.weather)
+  loadInitialState().catch((error) => showError(error && error.stack ? error.stack : error))
+  connectWs()
+  refreshAmbientNow(true).catch(() => {})
+  weatherFrameId = requestAnimationFrame(startVisualLoop)
+})()
+</script>
+</body>
+</html>

@@ -1,0 +1,237 @@
+*, *::before, *::after { box-sizing: border-box; margin: 0; padding: 0; }
+
+:root {
+  --bg: #0a0a0a;
+  --surface: #141414;
+  --text: #e8e8e8;
+  --muted: #666;
+  --accent: #c8a96e;
+  --radius: 12px;
+}
+
+body {
+  background: var(--bg);
+  color: var(--text);
+  font-family: -apple-system, 'PingFang SC', sans-serif;
+  min-height: 100dvh;
+  display: flex;
+  flex-direction: column;
+}
+
+#app {
+  flex: 1;
+  display: flex;
+  flex-direction: column;
+  max-width: 480px;
+  margin: 0 auto;
+  width: 100%;
+  padding-bottom: 64px;
+}
+
+/* 导航 */
+#nav {
+  position: fixed;
+  bottom: 0;
+  left: 50%;
+  transform: translateX(-50%);
+  width: 100%;
+  max-width: 480px;
+  display: flex;
+  background: var(--surface);
+  border-top: 1px solid #222;
+  z-index: 100;
+}
+.nav-btn {
+  flex: 1;
+  background: none;
+  border: none;
+  color: var(--muted);
+  padding: 14px 0;
+  cursor: pointer;
+  font-size: 13px;
+  transition: color .2s;
+}
+.nav-btn.active { color: var(--accent); }
+
+/* 视图 */
+.view { display: none; padding: 24px 20px; }
+.view.active { display: block; }
+
+/* Player */
+#cover-wrap {
+  display: flex;
+  justify-content: center;
+  margin: 20px 0;
+}
+#cover {
+  width: 240px;
+  height: 240px;
+  border-radius: var(--radius);
+  object-fit: cover;
+  background: var(--surface);
+}
+#song-info { text-align: center; margin-bottom: 16px; }
+#song-name { font-size: 20px; font-weight: 600; }
+#song-artist { font-size: 14px; color: var(--muted); margin-top: 4px; }
+
+#dj-say {
+  background: var(--surface);
+  border-left: 3px solid var(--accent);
+  padding: 12px 16px;
+  margin: 12px 0;
+  font-size: 14px;
+  line-height: 1.6;
+  border-radius: 0 var(--radius) var(--radius) 0;
+  transition: opacity .4s;
+}
+#dj-say.hidden { display: none; }
+
+#audio-player {
+  width: 100%;
+  margin: 12px 0;
+  accent-color: var(--accent);
+}
+
+#progress-wrap { margin-bottom: 16px; }
+#progress-bar {
+  height: 4px;
+  background: #222;
+  border-radius: 2px;
+  overflow: hidden;
+  cursor: pointer;
+}
+#progress-fill {
+  height: 100%;
+  background: var(--accent);
+  width: 0%;
+  transition: width .5s linear;
+}
+#progress-time {
+  display: flex;
+  justify-content: space-between;
+  font-size: 12px;
+  color: var(--muted);
+  margin-top: 4px;
+}
+
+/* 队列 */
+#queue-wrap {
+  margin: 12px 0 4px;
+}
+#queue-wrap.hidden { display: none; }
+#queue-header {
+  font-size: 12px;
+  color: var(--muted);
+  margin-bottom: 6px;
+  text-transform: uppercase;
+  letter-spacing: .04em;
+}
+#queue-list {
+  list-style: none;
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+}
+#queue-list li {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  padding: 7px 12px;
+  background: var(--surface);
+  border-radius: 8px;
+  font-size: 13px;
+}
+#queue-list li .q-idx {
+  color: var(--muted);
+  font-size: 11px;
+  min-width: 14px;
+  text-align: right;
+}
+#queue-list li .q-name { flex: 1; }
+#queue-list li .q-artist { color: var(--muted); font-size: 12px; }
+
+#chat-area {
+  display: flex;
+  gap: 8px;
+  margin-top: 8px;
+}
+#chat-input {
+  flex: 1;
+  background: var(--surface);
+  border: 1px solid #333;
+  border-radius: var(--radius);
+  color: var(--text);
+  padding: 10px 14px;
+  font-size: 14px;
+  outline: none;
+}
+#chat-input:focus { border-color: var(--accent); }
+#chat-send {
+  background: var(--accent);
+  color: #000;
+  border: none;
+  border-radius: var(--radius);
+  padding: 10px 18px;
+  cursor: pointer;
+  font-weight: 600;
+  font-size: 14px;
+}
+
+/* Profile */
+#view-profile h2, #view-settings h2 {
+  font-size: 16px;
+  color: var(--accent);
+  margin: 20px 0 10px;
+}
+#view-profile h2:first-child, #view-settings h2:first-child { margin-top: 0; }
+#taste-content {
+  background: var(--surface);
+  padding: 14px;
+  border-radius: var(--radius);
+  font-size: 13px;
+  line-height: 1.7;
+  white-space: pre-wrap;
+  color: var(--muted);
+}
+#recent-plays {
+  list-style: none;
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+}
+#recent-plays li {
+  background: var(--surface);
+  padding: 10px 14px;
+  border-radius: var(--radius);
+  font-size: 14px;
+}
+#recent-plays li span { color: var(--muted); font-size: 12px; margin-left: 8px; }
+
+/* Settings */
+#view-settings label {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+  margin-bottom: 16px;
+  font-size: 13px;
+  color: var(--muted);
+}
+.toggle-label { flex-direction: row !important; align-items: center; justify-content: space-between; }
+#view-settings input[type="text"] {
+  background: var(--surface);
+  border: 1px solid #333;
+  border-radius: var(--radius);
+  color: var(--text);
+  padding: 10px 14px;
+  font-size: 14px;
+  outline: none;
+}
+#settings-save {
+  background: var(--accent);
+  color: #000;
+  border: none;
+  border-radius: var(--radius);
+  padding: 10px 24px;
+  cursor: pointer;
+  font-weight: 600;
+}
