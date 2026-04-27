@@ -361,7 +361,7 @@
     padding: 12px 28px;
     cursor: pointer;
     position: relative;
-    z-index: 3;
+    z-index: 10;
     width: 100%;
     display: flex;
     align-items: center;
@@ -3335,12 +3335,23 @@
   document.getElementById('btn-note').addEventListener('click', explainCurrentTrack)
   document.getElementById('btn-dislike').addEventListener('click', () => sendFeedback('dislike'))
   document.getElementById('btn-heart').addEventListener('click', () => sendFeedback('like'))
-  const drawerToggle = document.getElementById('drawer-toggle')
-  drawerToggle.addEventListener('click', (event) => {
-    event.preventDefault()
-    event.stopPropagation()
-    toggleDrawer()
-  })
+  const drawerToggleBtn = document.getElementById('drawer-toggle')
+  if (drawerToggleBtn) {
+    drawerToggleBtn.addEventListener('click', (e) => {
+      e.preventDefault()
+      e.stopPropagation()
+      toggleDrawer()
+    })
+  }
+
+  const drawerCloseBtn = document.getElementById('drawer-close')
+  if (drawerCloseBtn) {
+    drawerCloseBtn.addEventListener('click', (e) => {
+      e.preventDefault()
+      e.stopPropagation()
+      closeDrawer()
+    })
+  }
   playButton.addEventListener('click', togglePlay)
   composerSend.addEventListener('click', send)
   composerInput.addEventListener('input', renderControls)
