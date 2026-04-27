@@ -36,13 +36,10 @@ function parseNcmTxt(filePath) {
 function parseXiamiLikedSongs(filePath) {
   const songs = []
   try {
-    const lines = fs.readFileSync(filePath, 'utf8').split('\n')
-    // 第0行是标题行
+    const lines = fs.readFileSync(filePath, 'utf8').split(/\r?\n/)
     for (let i = 1; i < lines.length; i++) {
       const line = lines[i].trim()
       if (!line) continue
-      // CSV: 歌曲名,专辑名,艺人名,歌曲译名
-      // 用简单分割（艺人名中有分号分隔多艺人，取第一个）
       const parts = line.split(',')
       if (parts.length < 3) continue
       const name = parts[0].trim().replace(/^"|"$/g, '')
@@ -50,25 +47,25 @@ function parseXiamiLikedSongs(filePath) {
       const artist = rawArtist.split(';')[0].trim()
       if (name && artist) songs.push({ name, artist })
     }
-  } catch { /* 静默 */ }
+  } catch { }
   return songs
 }
 
 function parseXiamiPlaylists(filePath) {
   const songs = []
   try {
-    const lines = fs.readFileSync(filePath, 'utf8').split('\n')
-    for (const line of lines) {
+    const lines = fs.readFileSync(filePath, 'utf8').split(/\r?\n/)
+    for (let i = 1; i < lines.length; i++) {
+      const line = lines[i].trim()
+      if (!line) continue
       const parts = line.split(',')
       if (parts.length < 4) continue
-      // 格式: 歌单名,简介,歌曲名,艺人名,...
-      // 歌曲名在第2列，艺人名在第3列（都可能为空）
       const name = parts[2].trim().replace(/^"|"$/g, '')
       const rawArtist = parts[3].trim().replace(/^"|"$/g, '')
-      const artist = rawArtist.split('/')[0].trim().split(';')[0].trim()
+      const artist = rawArtist.split(/[;/／]|\s\/\s/)[0].trim()
       if (name && artist) songs.push({ name, artist })
     }
-  } catch { /* 静默 */ }
+  } catch { }
   return songs
 }
 
@@ -80,8 +77,8 @@ function loadPool() {
   if (_pool) return _pool
 
   const ncm = parseNcmTxt(path.join(ROOT, 'user/ncm-playlist.txt'))
-  const liked = parseXiamiLikedSongs(path.join(ROOT, 'user/xiami-liked-songs.csv'))
-  const playlists = parseXiamiPlaylists(path.join(ROOT, 'user/xiami-playlists.csv'))
+  const liked = parseXiamiLikedSongs(path.join(ROOT, 'user/收藏的歌曲.csv'))
+  const playlists = parseXiamiPlaylists(path.join(ROOT, 'user/创建的歌单.csv'))
 
   const all = [...ncm, ...liked, ...playlists]
 
