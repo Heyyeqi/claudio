@@ -14,6 +14,7 @@ const claude = require('./core/claude')
 const tts = require('./core/tts')
 const state = require('./core/state')
 const scheduler = require('./core/scheduler')
+const { getAstronomyContext } = require('./core/astronomy')
 
 const explainClient = new OpenAI({
   apiKey: process.env.DASHSCOPE_API_KEY,
@@ -61,6 +62,7 @@ const LOW_WATER_MARK = 5
 const ncmSearchCache = new Map()
 const SEARCH_CACHE_TTL_MS = 12 * 60 * 60 * 1000
 const SEARCH_CACHE_MISS_TTL_MS = 30 * 60 * 1000
+const NCM_ID_MAP_HIT_TTL_MS = 72 * 60 * 60 * 1000
 const NCM_ID_MAP_PREF = 'ncm_id_map_v1'
 const MAX_NCM_ID_MAP_SIZE = 400
 const RECENT_RECOMMENDED_PREF = 'recent_recommended_keys_v1'
@@ -106,6 +108,11 @@ function getRememberedSongId(name, artist) {
   const remembered = ncmIdMap[makeSongLookupKey(name, artist)]
   if (!remembered) return null
   if (remembered.status === 'miss' && Date.now() - remembered.updatedAt > SEARCH_CACHE_MISS_TTL_MS) {
+    delete ncmIdMap[makeSongLookupKey(name, artist)]
+    persistNcmIdMap()
+    return null
+  }
+  if (remembered.status === 'hit' && Date.now() - remembered.updatedAt > NCM_ID_MAP_HIT_TTL_MS) {
     delete ncmIdMap[makeSongLookupKey(name, artist)]
     persistNcmIdMap()
     return null
@@ -261,6 +268,26 @@ function rememberExplainOpening(text) {
   recentExplainOpenings = recentExplainOpenings.slice(-2)
 }
 
+function extractEmotionFromInput(userText) {
+  const triggers = [
+    { pattern: /烟花|firework/i, mood: '华丽短暂', suggestion: '陈绮贞《华丽的冒险》风格' },
+    { pattern: /害怕|恐惧|黑暗|一个人.*路/i, mood: '需要陪伴', suggestion: '热闹有人声、节奏感强' },
+    { pattern: /散步|漫步|走走/i, mood: '轻盈流动', suggestion: '方大同《春风吹》风格，轻盈律动' },
+    { pattern: /下雨|雨声/i, mood: '雨天慵懒', suggestion: '慢节奏、有质感的编曲' },
+    { pattern: /想家|思念|好久不见/i, mood: '思念', suggestion: '温柔、有故事感' },
+    { pattern: /失眠|睡不着/i, mood: '深夜清醒', suggestion: '极简、呼吸感强' },
+    { pattern: /开心|高兴|好消息/i, mood: '愉悦', suggestion: '明快、有光泽感的编曲' },
+    { pattern: /难过|伤心|哭/i, mood: '需要共鸣', suggestion: '贴近情绪而非刻意治愈' },
+    { pattern: /累|疲惫|下班/i, mood: '身心疲惫', suggestion: '慢下来、有托住感的音乐' },
+    { pattern: /喝酒|小酌|一杯/i, mood: '微醺', suggestion: '爵士感、慵懒、带点诗意' },
+  ]
+
+  for (const trigger of triggers) {
+    if (trigger.pattern.test(userText)) return { mood: trigger.mood, suggestion: trigger.suggestion }
+  }
+  return null
+}
+
 // ── NCM 工具 ─────────────────────────────────
 const COOKIE_PATH = path.join(__dirname, 'user/ncm-cookie.json')
 
@@ -351,7 +378,9 @@ async function ncmSearch(name, artist) {
   const candidates = []
   const expectedArtistParts = splitArtistNames(artist)
 
-  for (const query of queries) {
+  for (let queryIndex = 0; queryIndex < queries.length; queryIndex++) {
+    const query = queries[queryIndex]
+    const isFallback = queryIndex > 0
     const q = encodeURIComponent(query)
     const data = await ncmFetch(`${base}/search?keywords=${q}&limit=15`)
     const songs = data?.result?.songs || []
@@ -361,6 +390,12 @@ async function ncmSearch(name, artist) {
       seenIds.add(id)
       const score = scoreNcmCandidate(song, name, expectedArtistParts)
       if (score < 36) continue
+      if (isFallback) {
+        const cands = (song?.artists || []).map(a => normalizeNcmText(a.name)).filter(Boolean)
+        const artistScore = expectedArtistParts.reduce((sum, part) =>
+          sum + (cands.includes(part) ? 24 : cands.some(n => n.includes(part) || part.includes(n)) ? 12 : 0), 0)
+        if (artistScore < 12) continue
+      }
       candidates.push({ id, score, song })
     }
     if (candidates.length >= 5) break
@@ -379,11 +414,29 @@ async function ncmSearch(name, artist) {
   return ids
 }
 
+async function checkArtistViaDetail(candidateId, expectedArtistParts, base) {
+  if (!expectedArtistParts.length) return true
+  try {
+    const data = await ncmFetch(`${base}/song/detail?ids=${candidateId}`)
+    const song = data?.songs?.[0]
+    if (!song) return true
+    const actualArtists = (song.ar || []).map(a => normalizeNcmText(a.name)).filter(Boolean)
+    const artistScore = expectedArtistParts.reduce((sum, part) =>
+      sum + (actualArtists.includes(part) ? 24 : actualArtists.some(n => n.includes(part) || part.includes(n)) ? 12 : 0), 0)
+    if (artistScore < 12) {
+      console.log(`[ncm] 艺人不符 id=${candidateId}: 期望 [${expectedArtistParts}] 实际 [${actualArtists}]`)
+      return false
+    }
+    return true
+  } catch { return true }
+}
+
 async function ncmGetUrl(songId, name, artist) {
   const base = process.env.NCM_API_BASE || 'http://localhost:3000'
   const tried = new Set()
   const candidateIds = []
   const remembered = getRememberedSongId(name, artist)
+  const expectedArtistParts = splitArtistNames(artist)
 
   if (remembered?.id) candidateIds.push(String(remembered.id))
   if (songId && String(songId) !== '0') candidateIds.push(String(songId))
@@ -395,6 +448,7 @@ async function ncmGetUrl(songId, name, artist) {
     const data = await ncmFetch(`${base}/song/url/v1?id=${candidateId}&level=standard`)
     const item = data?.data?.[0]
     if (item?.url && item.code === 200) {
+      if (!(await checkArtistViaDetail(candidateId, expectedArtistParts, base))) continue
       rememberSongIdMapping(name, artist, candidateId, 'hit')
       if (candidateId !== String(songId)) {
         console.log(`[ncm] 搜索命中 "${name} / ${artist}" -> ${candidateId}`)
@@ -412,6 +466,7 @@ async function ncmGetUrl(songId, name, artist) {
     const data = await ncmFetch(`${base}/song/url/v1?id=${candidateId}&level=standard`)
     const item = data?.data?.[0]
     if (item?.url && item.code === 200) {
+      if (!(await checkArtistViaDetail(candidateId, expectedArtistParts, base))) continue
       rememberSongIdMapping(name, artist, candidateId, 'hit')
       console.log(`[ncm] 搜索命中 "${name} / ${artist}" -> ${candidateId}`)
       return { url: item.url, id: candidateId }
@@ -446,6 +501,7 @@ async function buildDjResponse(input, options = {}) {
     currentQueue = playQueue,
     appendQueue = false,
     includeSpeech = true,
+    emotionSignal = null,
   } = options
 
   const intent = router.route(input)
@@ -453,7 +509,7 @@ async function buildDjResponse(input, options = {}) {
     return { say: null, say_audio: null, queue: [], reason: '', segue: '', intent }
   }
 
-  const ctx = await context.buildContext(input, { currentQueue })
+  const ctx = await context.buildContext(input, { currentQueue, emotionSignal })
   const result = await claude.askClaude(ctx)
 
   let queue = []
@@ -654,7 +710,8 @@ app.post('/api/chat', async (req, res) => {
   if (!input) return res.status(400).json({ error: 'input 不能为空' })
 
   try {
-    const payload = await buildDjResponse(input, { persistMessages: true, broadcast: true })
+    const emotionSignal = extractEmotionFromInput(input)
+    const payload = await buildDjResponse(input, { persistMessages: true, broadcast: true, emotionSignal })
     return res.json(payload)
   } catch (e) {
     console.error('[/api/chat]', e)
@@ -773,6 +830,7 @@ app.post('/api/location', async (req, res) => {
   }
 
   try {
+    context.storeCoordinates(lat, lon)
     const weather = await context.fetchWeatherByCoords(lat, lon)
     return res.json({ ok: true, weather })
   } catch (e) {
@@ -815,6 +873,13 @@ app.get('/api/queue', (req, res) => {
 app.get('/api/now', async (req, res) => {
   const plays = state.getRecentPlays(1)
   const weather = await context.getWeather()
+  const coords = context.getStoredCoordinates()
+  const astronomy = coords
+    ? await getAstronomyContext(coords.lat, coords.lon, Date.now()).catch(error => {
+        console.error('[/api/now astronomy]', error)
+        return null
+      })
+    : null
   const fallbackTrack = playQueue[0]?.song_info || null
   const activeTrack = currentNowPlaying || fallbackTrack || null
   const feedback = activeTrack ? state.getSongFeedback(activeTrack) : null
@@ -839,11 +904,52 @@ app.get('/api/now', async (req, res) => {
     today_count: scheduler.getTodayCount(),
     current_feedback: feedback?.feedback === 'neutral' ? null : (feedback?.feedback || null),
     weather: weather || null,
+    astronomy,
     sunrise: weather?.sunrise || null,
     sunset: weather?.sunset || null,
     sunrise_ts: weather?.sunriseTs || null,
     sunset_ts: weather?.sunsetTs || null,
   })
+})
+
+app.get('/api/astronomy-debug', async (req, res) => {
+  const defaultCoords = { lat: 31.2304, lon: 121.4737 }
+  const queryLat = Number(req.query?.lat)
+  const queryLon = Number(req.query?.lon)
+  const storedCoords = context.getStoredCoordinates()
+  const coords = Number.isFinite(queryLat) && Number.isFinite(queryLon)
+    ? { lat: queryLat, lon: queryLon }
+    : storedCoords || defaultCoords
+  const coordinateSource = Number.isFinite(queryLat) && Number.isFinite(queryLon)
+    ? 'user_provided'
+    : storedCoords
+      ? 'user_provided'
+      : 'default_shanghai'
+
+  try {
+    const astronomy = await getAstronomyContext(coords.lat, coords.lon, Date.now())
+    const weather = Number.isFinite(queryLat) && Number.isFinite(queryLon)
+      ? null
+      : await context.getWeather().catch(() => null)
+    const hourOfDay = Number(new Intl.DateTimeFormat('en-GB', {
+      timeZone: 'Asia/Shanghai',
+      hour: '2-digit',
+      hour12: false,
+    }).format(new Date()))
+    const inferredEmotions = context.inferAmbientEmotion(astronomy, weather, hourOfDay)
+    return res.json({
+      ...astronomy,
+      coordinateSource,
+      culturalZone: astronomy.culturalZone,
+      activeFestivalsToday: astronomy.activeFestivalsToday,
+      inferredEmotions,
+      canvasHintActive: astronomy.canvasHintActive,
+      birthdayThisYear: astronomy.birthdayThisYear,
+    })
+  } catch (error) {
+    console.error('[/api/astronomy-debug]', error)
+    return res.status(500).json({ error: error.message })
+  }
 })
 
 // GET /api/taste

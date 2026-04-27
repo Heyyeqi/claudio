@@ -895,6 +895,9 @@
   const autoExplainedTracks = new Set()
   let forcedThemeKey = null
   let activeExplainToken = 0
+  let lastAppliedThemeKey = null
+  let inThemeTransition = false
+  let lastRenderedForceKey = null
 
   const VISUAL_PHASES = {
     sunrise: {
@@ -992,6 +995,8 @@
     queue: [],
     currentTrack: null,
     weather: null,
+    astronomy: null,
+    canvasHint: null,
     sunrise: null,
     sunset: null,
     sunriseTs: null,
@@ -1072,9 +1077,16 @@
     }
   }
 
+  const _colorCache = {}
+  function cachedParseColor(colorStr) {
+    if (_colorCache[colorStr]) return _colorCache[colorStr]
+    _colorCache[colorStr] = parseColor(colorStr)
+    return _colorCache[colorStr]
+  }
+
   function mixColor(a, b, t) {
-    const c1 = parseColor(a)
-    const c2 = parseColor(b)
+    const c1 = cachedParseColor(a)
+    const c2 = cachedParseColor(b)
     const mix = (x, y) => x + (y - x) * t
     return `rgba(${Math.round(mix(c1.r, c2.r))}, ${Math.round(mix(c1.g, c2.g))}, ${Math.round(mix(c1.b, c2.b))}, ${mix(c1.a, c2.a).toFixed(4)})`
   }
@@ -1147,11 +1159,11 @@
   function getInterpolatedThemeState(nowMs) {
     const themeKey = resolveThemeKey(new Date(nowMs), state.sunrise, state.sunset, state.sunriseTs, state.sunsetTs)
     const themeState = getThemeState(themeKey, nowMs)
-    if (forcedThemeKey) return { themeKey, themeState }
+    if (forcedThemeKey) return { themeKey, themeState, transitioning: false }
 
     const windows = getPhaseWindows(nowMs, state.sunriseTs, state.sunsetTs)
     const currentWindow = windows.find(item => item.key === themeKey)
-    if (!currentWindow) return { themeKey, themeState }
+    if (!currentWindow) return { themeKey, themeState, transitioning: false }
 
     const transitionDuration = 8 * 60000
     const { prev } = getAdjacentThemeKeys(themeKey)
@@ -1161,13 +1173,13 @@
       const keys = Object.keys(themeState).filter(key => key !== 'bgGradient')
       const blended = { bgGradient: t > 0.5 ? themeState.bgGradient : prevState.bgGradient }
       for (const key of keys) blended[key] = mixColor(prevState[key], themeState[key], t)
-      return { themeKey, themeState: blended }
+      return { themeKey, themeState: blended, transitioning: true }
     }
 
-    return { themeKey, themeState }
+    return { themeKey, themeState, transitioning: false }
   }
 
-  function setTheme(theme) {
+  function setTheme(theme, themeKey) {
     const root = document.documentElement
     root.style.setProperty('--bg', theme.bg)
     root.style.setProperty('--accent', theme.accent)
@@ -1186,7 +1198,6 @@
     app.style.background = theme.bgGradient || theme.bg
     const fillEl = document.getElementById('progress-fill')
     if (fillEl) {
-      const themeKey = state.themeKey
       const gradients = {
         sunrise: 'linear-gradient(to right, #8A5A3A, #D4956A)',
         morning: 'linear-gradient(to right, #B8965A, #D4B878)',
@@ -1198,7 +1209,7 @@
     }
     const drawerEl = document.getElementById('drawer')
     if (drawerEl) {
-      const isLight = ['morning', 'noon'].includes(state.themeKey)
+      const isLight = ['morning', 'noon'].includes(themeKey)
       drawerEl.style.background = isLight
         ? 'linear-gradient(to bottom, rgba(248,244,238,0.55), rgba(240,236,228,0.78))'
         : 'linear-gradient(to bottom, rgba(8,8,12,0.45), rgba(6,6,10,0.72))'
@@ -1253,7 +1264,8 @@
     forcedThemeKey = forcedThemeKey === nextTheme ? null : nextTheme
     const visualTheme = getInterpolatedThemeState(Date.now())
     state.themeKey = visualTheme.themeKey
-    setTheme(visualTheme.themeState)
+    setTheme(visualTheme.themeState, visualTheme.themeKey)
+    if (state.weather) initCloudSystem(state.weather, state.astronomy)
     renderThemePreview()
   }
 
@@ -1581,14 +1593,17 @@
     state.currentFeedback = nowData.current_feedback || null
 
     state.weather = nowData.weather || null
+    state.astronomy = nowData.astronomy || buildFallbackAstronomy()
+    state.canvasHint = state.astronomy?.canvasHintActive || null
+    setCanvasHint(state.canvasHint)
     state.sunrise = nowData.sunrise || null
     state.sunset = nowData.sunset || null
     state.sunriseTs = nowData.sunrise_ts || nowData.weather?.sunriseTs || null
     state.sunsetTs = nowData.sunset_ts || nowData.weather?.sunsetTs || null
     const visualTheme = getInterpolatedThemeState(Date.now())
     state.themeKey = visualTheme.themeKey
-    setTheme(visualTheme.themeState)
-    startWeatherSystem(nowData.weather || null)
+    setTheme(visualTheme.themeState, visualTheme.themeKey)
+    startWeatherSystem(nowData.weather || null, state.astronomy)
 
     if (Array.isArray(queueData.queue)) setLocalQueue(queueData.queue)
 
@@ -1640,7 +1655,7 @@
         if (data.sunset_ts) state.sunsetTs = data.sunset_ts
         if (data.weather) {
           state.weather = data.weather
-          startWeatherSystem(state.weather)
+          startWeatherSystem(state.weather, state.astronomy)
           renderHero()
         }
         if (data.type === 'playlist-ready') {
@@ -1822,8 +1837,11 @@
   const visualState = {
     width: 0,
     height: 0,
+    heroClipHeight: 0,
     dpr: 1,
     phaseSeeds: {},
+    starField: null,
+    cloudSystem: [],
     currentWeatherProfile: null,
     previousWeatherProfile: null,
     weatherTransitionStart: 0,
@@ -1833,10 +1851,88 @@
     lastWeatherFetchAt: 0,
     fetchingAmbient: false,
     flashUntil: 0,
+    hintActivatedAt: 0,
+    canvasHintKey: null,
+    canvasHintSeeds: {},
   }
+
+  const HERO_MAX_RATIO = 0.70
 
   function rand(min, max) {
     return min + Math.random() * (max - min)
+  }
+
+  function heroMaxY() {
+    return visualState.height * HERO_MAX_RATIO
+  }
+
+  function randomHeroY(minRatio = 0.05, maxRatio = 0.95) {
+    return rand(visualState.height * minRatio, heroMaxY() * maxRatio)
+  }
+
+  function clampHeroY(y) {
+    return Math.max(0, Math.min(heroMaxY(), y))
+  }
+
+  function withHeroClip(drawer) {
+    const limit = heroMaxY()
+    ctx.save()
+    ctx.beginPath()
+    ctx.rect(0, 0, visualState.width, limit)
+    ctx.clip()
+    drawer(limit)
+    ctx.restore()
+  }
+
+  function fillRadialGradientBounds(cx, cy, radius, width = visualState.width, clipHeight = visualState.heroClipHeight || visualState.height) {
+    const left = Math.max(0, cx - radius)
+    const top = Math.max(0, cy - radius)
+    const right = Math.min(width, cx + radius)
+    const bottom = Math.min(clipHeight, cy + radius)
+    const rectWidth = Math.max(0, right - left)
+    const rectHeight = Math.max(0, bottom - top)
+    if (rectWidth <= 0 || rectHeight <= 0) return
+    ctx.fillRect(left, top, rectWidth, rectHeight)
+  }
+
+  function estimateFallbackSolarAltitude(hourOfDay) {
+    if (hourOfDay < 6 || hourOfDay > 18) return -8
+    const progress = (hourOfDay - 6) / 12
+    return Math.sin(progress * Math.PI) * 70
+  }
+
+  function buildFallbackAstronomy(nowMs = Date.now()) {
+    const now = new Date(nowMs)
+    const hourOfDay = now.getHours() + now.getMinutes() / 60
+    const solarAltitude = estimateFallbackSolarAltitude(hourOfDay)
+    const dayProgress = clamp((hourOfDay - 6) / 12, 0, 1)
+    const isDaytime = hourOfDay >= 6 && hourOfDay < 18
+    const isNight = !isDaytime
+    const lunarAltitude = 35
+    return {
+      solar: {
+        altitude: solarAltitude,
+        azimuth: 60 + dayProgress * 240,
+        phase: isDaytime
+          ? (hourOfDay < 8 ? 'sunrise' : hourOfDay < 12 ? 'morning' : hourOfDay < 15 ? 'noon' : 'afternoon')
+          : 'night',
+      },
+      lunar: {
+        phase: 0.3705,
+        phaseName: 'waxing_gibbous',
+        illumination: 0.84,
+        altitude: lunarAltitude,
+        isVisible: lunarAltitude > 0,
+      },
+      stars: {
+        visibility: isNight ? 0.68 : 0,
+      },
+      canvasHintActive: null,
+    }
+  }
+
+  function normalizeAstronomy(astronomy, nowMs = Date.now()) {
+    return astronomy || buildFallbackAstronomy(nowMs)
   }
 
   function resizeCanvas() {
@@ -1844,6 +1940,7 @@
     const dpr = window.devicePixelRatio || 1
     visualState.width = rect.width
     visualState.height = rect.height
+    visualState.heroClipHeight = rect.height * 0.72
     visualState.dpr = dpr
     canvas.width = rect.width * dpr
     canvas.height = rect.height * dpr
@@ -1851,7 +1948,8 @@
     canvas.style.height = `${rect.height}px`
     ctx.setTransform(dpr, 0, 0, dpr, 0, 0)
     initPhaseSeeds()
-    if (state.weather) startWeatherSystem(state.weather, true)
+    initStarField()
+    if (state.weather) startWeatherSystem(state.weather, state.astronomy, true)
   }
 
   function initPhaseSeeds() {
@@ -1860,7 +1958,7 @@
     visualState.phaseSeeds = {
       morningGlows: Array.from({ length: 5 }, () => ({
         x: rand(width * 0.05, width * 0.95),
-        y: rand(height * 0.05, height * 0.6),
+        y: rand(height * 0.05, height * 0.62),
         vx: rand(0.06, 0.14) * (Math.random() < 0.5 ? 1 : -1),
         vy: rand(0.04, 0.1) * (Math.random() < 0.5 ? 1 : -1),
         radius: rand(width * 0.18, width * 0.32),
@@ -1875,35 +1973,152 @@
       })),
       nightGlows: Array.from({ length: 3 }, () => ({
         x: rand(width * 0.1, width * 0.9),
-        y: rand(height * 0.05, height * 0.55),
+        y: rand(height * 0.05, height * 0.60),
         vx: rand(0.03, 0.08) * (Math.random() < 0.5 ? 1 : -1),
         vy: rand(0.02, 0.06) * (Math.random() < 0.5 ? 1 : -1),
         radius: rand(width * 0.22, width * 0.38),
         color: Math.random() < 0.6 ? '#1A2A4A' : '#2A1A08',
         alpha: rand(0.18, 0.28),
       })),
-      nightClouds: Array.from({ length: 3 }, (_, index) => ({
-        x: rand(-width * 0.2, width * 0.5),
-        y: height * (0.16 + index * 0.14),
-        w: rand(width * 0.3, width * 0.48),
-        h: rand(height * 0.08, height * 0.14),
-        speed: rand(0.1, 0.2),
-        alpha: rand(0.08, 0.12),
-        seed: Math.random() * Math.PI * 2,
-      })),
+    }
+    if (visualState.canvasHintKey) {
+      initCanvasHintSeeds(visualState.canvasHintKey)
     }
   }
 
-  function drawBlobCloud(cloud, alphaScale) {
-    const segments = 4
-    for (let i = 0; i < segments; i += 1) {
-      const offsetX = (i - 1.5) * cloud.w * 0.18
-      const offsetY = Math.sin(cloud.seed + i) * cloud.h * 0.08
-      ctx.beginPath()
-      ctx.fillStyle = `rgba(26, 26, 26, ${(cloud.alpha * alphaScale).toFixed(4)})`
-      ctx.ellipse(cloud.x + offsetX, cloud.y + offsetY, cloud.w * (0.26 + i * 0.03), cloud.h * (0.58 + (i % 2) * 0.08), 0, 0, Math.PI * 2)
-      ctx.fill()
+  function initStarField() {
+    const width = visualState.width
+    const height = visualState.height
+
+    visualState.starField = {
+      bright: Array.from({ length: 12 }, () => ({
+        x: rand(0, width),
+        y: rand(0, heroMaxY() * 0.8),
+        size: rand(1.4, 2.2),
+        baseAlpha: rand(0.55, 0.85),
+        period: rand(2800, 5000),
+        phase: rand(0, Math.PI * 2),
+        color: Math.random() < 0.15
+          ? '255,200,180'
+          : Math.random() < 0.15
+            ? '180,200,255'
+            : '240,238,228',
+      })),
+      medium: Array.from({ length: 35 }, () => ({
+        x: rand(0, width),
+        y: rand(0, heroMaxY() * 0.9),
+        size: rand(0.9, 1.5),
+        baseAlpha: rand(0.25, 0.5),
+        period: rand(4000, 8000),
+        phase: rand(0, Math.PI * 2),
+        color: '235,233,225',
+      })),
+      dim: Array.from({ length: 60 }, () => ({
+        x: rand(0, width),
+        y: rand(0, heroMaxY() * 0.97),
+        size: rand(0.6, 1.0),
+        baseAlpha: rand(0.1, 0.22),
+        period: rand(6000, 12000),
+        phase: rand(0, Math.PI * 2),
+        color: '220,220,215',
+      })),
+      shootingStars: [],
+      lastShootingStarAt: 0,
     }
+  }
+
+  function initCanvasHintSeeds(hint) {
+    const width = visualState.width
+    const height = visualState.height
+    const maxY = heroMaxY()
+    if (!hint) {
+      visualState.canvasHintSeeds = {}
+      return
+    }
+
+    if (hint === 'petals') {
+      visualState.canvasHintSeeds.petals = Array.from({ length: 12 }, () => ({
+        x: rand(0, width),
+        y: rand(-height * 0.2, maxY * 0.97),
+        size: rand(3, 6),
+        speed: rand(0.12, 0.22),
+        sway: rand(6, 18),
+        phase: rand(0, Math.PI * 2),
+        rotation: rand(0, Math.PI * 2),
+        rotationSpeed: rand(-0.01, 0.01),
+      }))
+    } else if (hint === 'autumn_leaves') {
+      visualState.canvasHintSeeds.autumnLeaves = Array.from({ length: 10 }, () => ({
+        x: rand(0, width),
+        y: rand(-height * 0.1, maxY * 0.94),
+        size: rand(4, 7),
+        speed: rand(0.16, 0.28),
+        sway: rand(8, 20),
+        phase: rand(0, Math.PI * 2),
+        rotation: rand(0, Math.PI * 2),
+        rotationSpeed: rand(-0.012, 0.012),
+      }))
+    } else if (hint === 'grey_mist') {
+      visualState.canvasHintSeeds.greyMist = Array.from({ length: 3 }, (_, index) => ({
+        x: rand(-width * 0.2, width * 0.15),
+        y: Math.min(maxY - height * 0.08, height * (0.22 + index * 0.18)),
+        width: rand(width * 0.7, width * 0.95),
+        height: rand(height * 0.06, height * 0.1),
+        speed: rand(0.08, 0.16),
+        alpha: rand(0.06, 0.1),
+      }))
+    } else if (hint === 'golden_dust') {
+      visualState.canvasHintSeeds.goldenDust = Array.from({ length: 20 }, () => ({
+        x: rand(0, width),
+        y: rand(height * 0.3, maxY),
+        size: rand(1, 2),
+        speed: rand(0.08, 0.18),
+        alpha: rand(0.1, 0.2),
+        phase: rand(0, Math.PI * 2),
+      }))
+    } else if (hint === 'heat_shimmer') {
+      visualState.canvasHintSeeds.heatBands = Array.from({ length: 3 }, (_, index) => ({
+        y: Math.min(maxY - height * 0.08, height * (0.24 + index * 0.2)),
+        height: rand(height * 0.08, height * 0.12),
+        width: width * 1.2,
+        phase: rand(0, Math.PI * 2),
+        speed: rand(5000, 7000),
+      }))
+    } else if (hint === 'snow_soft') {
+      visualState.canvasHintSeeds.snowSoft = Array.from({ length: 8 }, () => ({
+        x: rand(0, width),
+        y: rand(-height, maxY),
+        size: rand(3, 5),
+        speed: rand(0.4, 0.6),
+        alpha: rand(0.12, 0.22),
+        driftSeed: rand(0, Math.PI * 2),
+      }))
+    } else if (hint === 'fireworks') {
+      visualState.canvasHintSeeds.fireworks = {
+        bursts: [],
+        nextBurstAt: 0,
+      }
+    } else if (hint === 'birthday_glow') {
+      visualState.canvasHintSeeds.birthdayGlows = [
+        { x: width * 0.24, y: Math.min(maxY * 0.4, height * 0.28), radius: width * 0.28, color: '#D4B878', speed: 12000, phase: 0.2 },
+        { x: width * 0.72, y: Math.min(maxY * 0.48, height * 0.34), radius: width * 0.24, color: '#D79AA0', speed: 15000, phase: 1.5 },
+        { x: width * 0.52, y: Math.min(maxY * 0.26, height * 0.18), radius: width * 0.22, color: '#8AAAD4', speed: 18000, phase: 2.6 },
+      ]
+    } else if (hint === 'warm_memory') {
+      visualState.canvasHintSeeds.warmMemory = {
+        x: width * 0.34,
+        y: Math.min(maxY * 0.78, height * 0.56),
+        radius: width * 0.44,
+      }
+    }
+  }
+
+  function setCanvasHint(hint) {
+    const nextHint = hint || null
+    if (visualState.canvasHintKey === nextHint) return
+    visualState.canvasHintKey = nextHint
+    visualState.hintActivatedAt = Date.now()
+    initCanvasHintSeeds(nextHint)
   }
 
   function makeRainParticles(count, color) {
@@ -1931,20 +2146,10 @@
   function makeSparkParticles(count, mode) {
     return Array.from({ length: count }, () => ({
       x: rand(visualState.width * 0.2, visualState.width * 0.8),
-      y: rand(visualState.height * 0.42, visualState.height * 0.92),
+      y: rand(visualState.height * 0.42, visualState.height * 0.62),
       size: mode === 'sunset' ? rand(1.5, 3) : rand(4, 8),
       speed: mode === 'day' ? rand(0.18, 0.22) : rand(0.24, 0.32),
       alpha: mode === 'sunset' ? rand(0.22, 0.34) : rand(0.18, 0.28),
-    }))
-  }
-
-  function makeStars(count) {
-    return Array.from({ length: count }, () => ({
-      x: rand(0, visualState.width),
-      y: rand(0, visualState.height * 0.45),
-      baseAlpha: rand(0.15, 0.4),
-      period: rand(3000, 7000),
-      phase: Math.random() * Math.PI * 2,
     }))
   }
 
@@ -1958,18 +2163,6 @@
     }))
   }
 
-  function makeCloudOverlay(count, alphaMin, alphaMax) {
-    return Array.from({ length: count }, (_, index) => ({
-      x: rand(-visualState.width * 0.2, visualState.width * 0.7),
-      y: visualState.height * (0.16 + index * 0.12),
-      w: rand(visualState.width * 0.32, visualState.width * 0.5),
-      h: rand(visualState.height * 0.08, visualState.height * 0.14),
-      speed: rand(0.06, 0.12),
-      alpha: rand(alphaMin, alphaMax),
-      seed: Math.random() * Math.PI * 2,
-    }))
-  }
-
   function getWeatherSignature(weather) {
     if (!weather) return 'none'
     return [
@@ -1979,11 +2172,13 @@
     ].join('|')
   }
 
-  function createWeatherProfile(weather) {
+  function createWeatherProfile(weather, astronomy) {
     const main = weather?.main || 'Clear'
     const description = weather?.description || ''
     const cloudiness = typeof weather?.cloudiness === 'number' ? weather.cloudiness : null
     const themeKey = state.themeKey
+    const solarAltitude = astronomy?.solar?.altitude ?? null
+    const isDaylight = solarAltitude !== null ? solarAltitude > -6 : themeKey !== 'night'
     const profile = {
       main,
       description,
@@ -1991,8 +2186,6 @@
       hazeFilter: '',
       particles: [],
       snow: [],
-      stars: [],
-      clouds: [],
       fog: null,
       overlayColor: null,
       kind: 'none',
@@ -2001,13 +2194,10 @@
 
     if (main === 'Clear') {
       profile.kind = 'clear'
-      if (themeKey === 'night') {
-        profile.stars = makeStars(10)
-        profile.count = profile.stars.length
-      } else if (themeKey === 'sunset') {
+      if (themeKey === 'sunset') {
         profile.particles = makeSparkParticles(3, 'sunset')
         profile.count = profile.particles.length
-      } else {
+      } else if (isDaylight) {
         profile.particles = makeSparkParticles(themeKey === 'sunrise' ? 3 : 4, 'day')
         profile.count = profile.particles.length
       }
@@ -2016,14 +2206,10 @@
 
     if (main === 'Clouds') {
       profile.kind = 'clouds'
-      if ((cloudiness ?? 100) < 50) {
-        profile.clouds = makeCloudOverlay(2, 0.05, 0.05)
-        if (themeKey === 'night') profile.stars = makeStars(8)
-        else profile.particles = makeSparkParticles(3, themeKey === 'sunset' ? 'sunset' : 'day')
-      } else {
-        profile.clouds = makeCloudOverlay(4, 0.1, 0.15)
+      if ((cloudiness ?? 100) < 50 && isDaylight) {
+        profile.particles = makeSparkParticles(3, themeKey === 'sunset' ? 'sunset' : 'day')
       }
-      profile.count = profile.clouds.length + profile.particles.length + profile.stars.length
+      profile.count = profile.particles.length
       return profile
     }
 
@@ -2077,11 +2263,77 @@
     return profile
   }
 
-  function startWeatherSystem(weather, immediate = false) {
+  function initCloudSystem(weather, astronomy) {
+    const width = visualState.width
+    const height = visualState.height
+    const main = weather?.main || 'Clear'
+    const cloudiness = weather?.cloudiness ?? 0
+    const themeKey = state.themeKey
+    let cloudColor
+    let cloudCount
+    let cloudAlphaRange
+    let cloudHeightRange
+
+    if (main === 'Rain' || main === 'Drizzle' || main === 'Thunderstorm') {
+      cloudColor = themeKey === 'night' || themeKey === 'sunset'
+        ? { r: 40, g: 40, b: 50 }
+        : { r: 120, g: 118, b: 125 }
+      cloudCount = 5
+      cloudAlphaRange = [0.18, 0.28]
+      cloudHeightRange = [0.05, 0.45]
+    } else if (main === 'Clouds') {
+      if (cloudiness > 70) {
+        cloudColor = themeKey === 'night'
+          ? { r: 30, g: 30, b: 45 }
+          : themeKey === 'sunset'
+            ? { r: 80, g: 55, b: 45 }
+            : { r: 180, g: 178, b: 182 }
+        cloudCount = 4
+        cloudAlphaRange = [0.12, 0.2]
+        cloudHeightRange = [0.04, 0.5]
+      } else {
+        cloudColor = themeKey === 'night'
+          ? { r: 35, g: 38, b: 55 }
+          : themeKey === 'sunset'
+            ? { r: 200, g: 120, b: 70 }
+            : themeKey === 'sunrise'
+              ? { r: 220, g: 160, b: 120 }
+              : { r: 240, g: 238, b: 242 }
+        cloudCount = 2
+        cloudAlphaRange = [0.08, 0.14]
+        cloudHeightRange = [0.08, 0.38]
+      }
+    } else {
+      cloudCount = 0
+      cloudColor = { r: 255, g: 255, b: 255 }
+      cloudAlphaRange = [0, 0]
+      cloudHeightRange = [0, 0]
+    }
+
+    visualState.cloudSystem = Array.from({ length: cloudCount }, () => ({
+      x: rand(-width * 0.15, width * 1.05),
+      y: height * rand(cloudHeightRange[0], cloudHeightRange[1]),
+      w: rand(width * 0.28, width * 0.52),
+      h: rand(height * 0.06, height * 0.12),
+      speed: rand(0.08, 0.18) * (main === 'Thunderstorm' ? 2.2 : 1),
+      alpha: rand(cloudAlphaRange[0], cloudAlphaRange[1]),
+      color: cloudColor,
+      blobSeeds: Array.from({ length: 5 }, () => ({
+        offsetX: rand(-0.3, 0.3),
+        offsetY: rand(-0.15, 0.15),
+        rx: rand(0.22, 0.35),
+        ry: rand(0.55, 0.85),
+      })),
+      seed: rand(0, Math.PI * 2),
+    }))
+  }
+
+  function startWeatherSystem(weather, astronomy, immediate = false) {
     const signature = getWeatherSignature(weather)
     if (!immediate && signature === visualState.weatherSignature) return
     visualState.previousWeatherProfile = immediate ? null : visualState.currentWeatherProfile
-    visualState.currentWeatherProfile = createWeatherProfile(weather)
+    visualState.currentWeatherProfile = createWeatherProfile(weather, astronomy)
+    initCloudSystem(weather, astronomy)
     visualState.weatherTransitionStart = performance.now()
     visualState.weatherSignature = signature
     canvas.style.filter = visualState.currentWeatherProfile?.hazeFilter || 'none'
@@ -2089,7 +2341,7 @@
 
   function drawRadialGlow(x, y, radius, color, alpha) {
     const gradient = ctx.createRadialGradient(x, y, 0, x, y, radius)
-    const c = parseColor(color)
+    const c = cachedParseColor(color)
     gradient.addColorStop(0, `rgba(${c.r}, ${c.g}, ${c.b}, ${alpha.toFixed(4)})`)
     gradient.addColorStop(1, `rgba(${c.r}, ${c.g}, ${c.b}, 0)`)
     ctx.fillStyle = gradient
@@ -2099,6 +2351,7 @@
   function drawPhaseBase(nowMs, phaseKey, alphaScale = 1) {
     const width = visualState.width
     const height = visualState.height
+    const maxY = heroMaxY()
     const phaseProgress = getPhaseProgress(phaseKey, nowMs, state.sunriseTs, state.sunsetTs)
 
     if (phaseKey === 'sunrise') {
@@ -2111,8 +2364,11 @@
       visualState.phaseSeeds.morningGlows.forEach((spot) => {
         spot.x += spot.vx
         spot.y += spot.vy
+        spot.y = Math.min(spot.y, visualState.heroClipHeight * 0.88)
         if (spot.x < -spot.radius || spot.x > width + spot.radius) spot.vx *= -1
-        if (spot.y < -spot.radius || spot.y > height * 0.72 + spot.radius) spot.vy *= -1
+        if (spot.y < -spot.radius || spot.y > maxY) {
+          spot.y = rand(height * 0.05, height * 0.62)
+        }
         const grad = ctx.createRadialGradient(spot.x, spot.y, 0, spot.x, spot.y, spot.radius)
         const alpha = spot.alpha * alphaScale
         grad.addColorStop(0, `hsla(${spot.hue}, 60%, 92%, ${alpha.toFixed(4)})`)
@@ -2136,13 +2392,14 @@
       visualState.phaseSeeds.noonRays.forEach((ray) => {
         const pulse = 0.5 + 0.5 * Math.sin(nowMs / ray.speed * Math.PI * 2 + ray.phase)
         const alpha = (ray.baseAlpha * 1.6 * pulse) * alphaScale
-        const grad = ctx.createLinearGradient(ray.x, 0, ray.x, height * 0.6)
+        const rayBottom = Math.min(maxY, height * 0.6)
+        const grad = ctx.createLinearGradient(ray.x, 0, ray.x, rayBottom)
         grad.addColorStop(0, `rgba(255, 252, 235, ${alpha.toFixed(4)})`)
         grad.addColorStop(0.5, `rgba(255, 248, 220, ${(alpha * 0.45).toFixed(4)})`)
         grad.addColorStop(1, 'rgba(255, 248, 220, 0)')
         ctx.fillStyle = grad
         const rayWidth = width * 0.18
-        ctx.fillRect(ray.x - rayWidth / 2, 0, rayWidth, height * 0.6)
+        ctx.fillRect(ray.x - rayWidth / 2, 0, rayWidth, rayBottom)
       })
       return
     }
@@ -2165,9 +2422,12 @@
       visualState.phaseSeeds.nightGlows.forEach((glow) => {
         glow.x += glow.vx
         glow.y += glow.vy
+        glow.y = Math.min(glow.y, visualState.heroClipHeight * 0.88)
         if (glow.x < -glow.radius || glow.x > width + glow.radius) glow.vx *= -1
-        if (glow.y < -glow.radius || glow.y > height * 0.65 + glow.radius) glow.vy *= -1
-        const c = parseColor(glow.color)
+        if (glow.y < -glow.radius || glow.y > maxY) {
+          glow.y = rand(height * 0.05, height * 0.60)
+        }
+        const c = cachedParseColor(glow.color)
         const grad = ctx.createRadialGradient(glow.x, glow.y, 0, glow.x, glow.y, glow.radius)
         const alpha = glow.alpha * alphaScale
         grad.addColorStop(0, `rgba(${c.r}, ${c.g}, ${c.b}, ${alpha.toFixed(4)})`)
@@ -2176,19 +2436,288 @@
         ctx.fillStyle = grad
         ctx.fillRect(0, 0, width, height)
       })
-      const bandGrad = ctx.createLinearGradient(0, height * 0.55, 0, height * 0.78)
+      const bandBottom = Math.min(maxY, height * 0.78)
+      const bandGrad = ctx.createLinearGradient(0, height * 0.55, 0, bandBottom)
       bandGrad.addColorStop(0, 'rgba(40, 28, 12, 0)')
       bandGrad.addColorStop(0.5, `rgba(40, 28, 12, ${(0.1 * alphaScale).toFixed(4)})`)
       bandGrad.addColorStop(1, 'rgba(40, 28, 12, 0)')
       ctx.fillStyle = bandGrad
-      ctx.fillRect(0, height * 0.55, width, height * 0.23)
-      visualState.phaseSeeds.nightClouds.forEach((cloud) => {
-        cloud.x += cloud.speed
-        if (cloud.x - cloud.w > width) {
-          cloud.x = -cloud.w
-          cloud.y = rand(height * 0.14, height * 0.52)
+      ctx.fillRect(0, height * 0.55, width, Math.max(0, bandBottom - height * 0.55))
+    }
+  }
+
+  function drawStarField(nowMs, astronomy, alphaScale) {
+    if (!astronomy) return
+    const visibility = astronomy.stars?.visibility ?? 0
+    if (visibility <= 0.02) return
+
+    const moonSuppression = astronomy.lunar?.isVisible
+      ? (astronomy.lunar.illumination || 0) * 0.6
+      : 0
+    const effectiveVisibility = Math.max(0, visibility - moonSuppression)
+    if (effectiveVisibility <= 0.02) return
+
+    const sf = visualState.starField
+    if (!sf) return
+
+    const width = visualState.width
+    const height = visualState.height
+    const maxY = heroMaxY()
+
+    withHeroClip(() => {
+      const drawLayer = (stars, layerAlphaMultiplier) => {
+        stars.forEach((star) => {
+          if (star.y < 0 || star.y > maxY) star.y = rand(0, maxY * 0.98)
+          const twinkle = 0.7 + 0.3 * Math.sin(nowMs / star.period * Math.PI * 2 + star.phase)
+          const alpha = star.baseAlpha * twinkle * effectiveVisibility * layerAlphaMultiplier * alphaScale
+          if (alpha < 0.01) return
+
+        if (star.size > 1.6 && alpha > 0.3) {
+          ctx.strokeStyle = `rgba(${star.color},${(alpha * 0.3).toFixed(4)})`
+          ctx.lineWidth = 0.5
+          ctx.beginPath()
+          ctx.moveTo(star.x - star.size * 2.5, star.y)
+          ctx.lineTo(star.x + star.size * 2.5, star.y)
+          ctx.moveTo(star.x, star.y - star.size * 2.5)
+          ctx.lineTo(star.x, star.y + star.size * 2.5)
+          ctx.stroke()
         }
-        drawBlobCloud(cloud, alphaScale)
+
+        ctx.beginPath()
+        ctx.fillStyle = `rgba(${star.color},${alpha.toFixed(4)})`
+        ctx.arc(star.x, star.y, star.size, 0, Math.PI * 2)
+        ctx.fill()
+        })
+      }
+
+      drawLayer(sf.dim, 1)
+      drawLayer(sf.medium, 1)
+      drawLayer(sf.bright, 1)
+    })
+
+    const minutesSinceLast = (nowMs - sf.lastShootingStarAt) / 60000
+    const shootingStarProbability = effectiveVisibility > 0.5
+      ? 0.00004 * effectiveVisibility
+      : 0
+
+    if (minutesSinceLast > 1 && Math.random() < shootingStarProbability) {
+      sf.shootingStars.push({
+        x: rand(width * 0.1, width * 0.9),
+        y: rand(height * 0.02, Math.min(maxY * 0.5, height * 0.35)),
+        vx: rand(2.5, 5) * (Math.random() < 0.5 ? 1 : -1),
+        vy: rand(1.5, 3),
+        length: rand(width * 0.08, width * 0.18),
+        alpha: 0.8,
+        born: nowMs,
+      })
+      sf.lastShootingStarAt = nowMs
+    }
+
+    sf.shootingStars = sf.shootingStars.filter((ss) => {
+      const age = nowMs - ss.born
+      const lifetime = 900
+      if (age > lifetime) return false
+
+      const progress = age / lifetime
+      const alpha = ss.alpha * (1 - progress) * effectiveVisibility * alphaScale
+      const tailX = ss.x - ss.vx * (ss.length / 5)
+      const tailY = ss.y - ss.vy * (ss.length / 5)
+      const grad = ctx.createLinearGradient(tailX, tailY, ss.x, ss.y)
+      grad.addColorStop(0, 'rgba(255,255,255,0)')
+      grad.addColorStop(1, `rgba(255,255,255,${alpha.toFixed(4)})`)
+      withHeroClip(() => {
+        ctx.strokeStyle = grad
+        ctx.lineWidth = 1.2
+        ctx.beginPath()
+        ctx.moveTo(tailX, tailY)
+        ctx.lineTo(ss.x, ss.y)
+        ctx.stroke()
+      })
+
+      ss.x += ss.vx
+      ss.y += ss.vy
+      if (ss.y < 0 || ss.y > maxY) {
+        ss.y = rand(height * 0.02, Math.min(maxY * 0.5, height * 0.35))
+      }
+      return true
+    })
+  }
+
+  function drawCloudSystem(nowMs, alphaScale) {
+    const clouds = visualState.cloudSystem
+    if (!clouds || !clouds.length) return
+
+    const width = visualState.width
+    const height = visualState.height
+
+    clouds.forEach((cloud) => {
+      cloud.x += cloud.speed
+      if (cloud.x - cloud.w * 0.5 > width * 1.1) {
+        cloud.x = -cloud.w * 0.6
+        cloud.y = height * rand(0.04, 0.48)
+      }
+
+      const { r, g, b } = cloud.color
+      const alpha = cloud.alpha * alphaScale
+      cloud.blobSeeds.forEach((blob) => {
+        const bx = cloud.x + blob.offsetX * cloud.w
+        const by = cloud.y + blob.offsetY * cloud.h + Math.sin(nowMs / 9000 + cloud.seed) * 2
+        const grad = ctx.createRadialGradient(bx, by, 0, bx, by, blob.rx * cloud.w)
+        grad.addColorStop(0, `rgba(${r},${g},${b},${alpha.toFixed(4)})`)
+        grad.addColorStop(0.6, `rgba(${r},${g},${b},${(alpha * 0.6).toFixed(4)})`)
+        grad.addColorStop(1, `rgba(${r},${g},${b},0)`)
+
+        ctx.save()
+        ctx.translate(bx, by)
+        ctx.scale(1, blob.ry / blob.rx)
+        ctx.beginPath()
+        ctx.arc(0, 0, blob.rx * cloud.w, 0, Math.PI * 2)
+        ctx.fillStyle = grad
+        ctx.fill()
+        ctx.restore()
+      })
+    })
+  }
+
+  function drawSun(nowMs, astronomy, alphaScale) {
+    if (!astronomy) return
+    const { altitude, azimuth } = astronomy.solar
+    if (altitude < -0.833) return
+
+    const width = visualState.width
+    const height = visualState.height
+    const x = width * clamp((azimuth - 60) / 240, 0, 1)
+    const sunAltitudeRatio = clamp(altitude / 90, 0, 1)
+    const y = height * (0.68 - 0.58 * sunAltitudeRatio)
+    const horizonProximity = 1 - Math.min(1, altitude / 20)
+    const baseAlpha = (0.18 + horizonProximity * 0.14) * alphaScale
+    const sunColor = {
+      r: 255,
+      g: Math.round(140 + (1 - horizonProximity) * 100),
+      b: Math.round(60 + (1 - horizonProximity) * 140),
+    }
+
+    const outerRadius = width * (0.55 - sunAltitudeRatio * 0.2)
+    const outerGrad = ctx.createRadialGradient(x, y, 0, x, y, outerRadius)
+    outerGrad.addColorStop(0, `rgba(${sunColor.r},${sunColor.g},${sunColor.b},${(baseAlpha * 0.35).toFixed(4)})`)
+    outerGrad.addColorStop(1, `rgba(${sunColor.r},${sunColor.g},${sunColor.b},0)`)
+    ctx.fillStyle = outerGrad
+    ctx.fillRect(0, 0, width, height)
+
+    const midRadius = width * (0.25 - sunAltitudeRatio * 0.08)
+    const midGrad = ctx.createRadialGradient(x, y, 0, x, y, midRadius)
+    midGrad.addColorStop(0, `rgba(${sunColor.r},${sunColor.g},${sunColor.b},${(baseAlpha * 0.65).toFixed(4)})`)
+    midGrad.addColorStop(1, `rgba(${sunColor.r},${sunColor.g},${sunColor.b},0)`)
+    ctx.fillStyle = midGrad
+    ctx.fillRect(0, 0, width, height)
+
+    const innerRadius = width * 0.06
+    const innerGrad = ctx.createRadialGradient(x, y, 0, x, y, innerRadius)
+    innerGrad.addColorStop(0, `rgba(255,255,${Math.round(200 + (1 - horizonProximity) * 55)},${(baseAlpha * 1.2).toFixed(4)})`)
+    innerGrad.addColorStop(1, 'rgba(255,255,200,0)')
+    ctx.fillStyle = innerGrad
+    ctx.fillRect(0, 0, width, height)
+
+    if (altitude < 15) {
+      const scatterGrad = ctx.createLinearGradient(0, y - height * 0.08, 0, y + height * 0.08)
+      scatterGrad.addColorStop(0, 'rgba(255,160,60,0)')
+      scatterGrad.addColorStop(0.5, `rgba(255,160,60,${(baseAlpha * 0.18).toFixed(4)})`)
+      scatterGrad.addColorStop(1, 'rgba(255,160,60,0)')
+      ctx.fillStyle = scatterGrad
+      ctx.fillRect(0, y - height * 0.08, width, height * 0.16)
+    }
+  }
+
+  function drawMoon(nowMs, astronomy, alphaScale) {
+    if (!astronomy) return
+
+    const phaseKey = state.themeKey
+    const lunar = astronomy.lunar || {}
+    const solarPhase = astronomy.solar?.phase || phaseKey
+    const effectivePhase = forcedThemeKey ? phaseKey : solarPhase
+    const shouldDrawMoon = effectivePhase === 'night'
+      ? Boolean(lunar.isVisible && (lunar.altitude || 0) > 0)
+      : effectivePhase === 'sunset'
+        ? (lunar.altitude || 0) > 20
+        : false
+    if (!shouldDrawMoon) return
+
+    const { phase, illumination, altitude } = lunar
+    const width = visualState.width
+    const height = visualState.height
+    const isWaxing = phase < 0.5
+    const moonX = width * (isWaxing ? 0.72 : 0.28)
+    const altitudeRatio = clamp(altitude / 70, 0, 1)
+    const moonY = height * (0.82 - 0.74 * clamp(altitude / 90, 0, 1))
+    const moonRadius = width * 0.055
+
+    const glowRadius = moonRadius * (2.5 + illumination * 1.5)
+    const glowAlpha = illumination * 0.12 * alphaScale
+    const glowGrad = ctx.createRadialGradient(moonX, moonY, 0, moonX, moonY, glowRadius)
+    glowGrad.addColorStop(0, `rgba(220,220,200,${glowAlpha.toFixed(4)})`)
+    glowGrad.addColorStop(1, 'rgba(220,220,200,0)')
+    ctx.fillStyle = glowGrad
+    ctx.fillRect(0, 0, width, height)
+
+    ctx.beginPath()
+    ctx.arc(moonX, moonY, moonRadius, 0, Math.PI * 2)
+    ctx.fillStyle = `rgba(30, 30, 40, ${(0.85 * alphaScale).toFixed(4)})`
+    ctx.fill()
+
+    ctx.save()
+    ctx.beginPath()
+    ctx.arc(moonX, moonY, moonRadius, 0, Math.PI * 2)
+    ctx.clip()
+
+    const illuminatedColor = `rgba(235, 230, 210, ${(0.92 * alphaScale).toFixed(4)})`
+    if (phase < 0.5) {
+      const progress = phase * 2
+      ctx.beginPath()
+      ctx.arc(moonX, moonY, moonRadius, -Math.PI / 2, Math.PI / 2)
+      ctx.lineTo(moonX, moonY - moonRadius)
+      ctx.fillStyle = illuminatedColor
+      ctx.fill()
+      const rx = moonRadius * Math.abs(1 - progress * 2)
+      if (rx > 0.5) {
+        ctx.beginPath()
+        ctx.ellipse(moonX, moonY, rx, moonRadius, 0, -Math.PI / 2, Math.PI / 2)
+        ctx.lineTo(moonX, moonY - moonRadius)
+        ctx.fillStyle = progress < 0.5
+          ? `rgba(30,30,40,${(0.85 * alphaScale).toFixed(4)})`
+          : illuminatedColor
+        ctx.fill()
+      }
+    } else {
+      const progress = (phase - 0.5) * 2
+      ctx.beginPath()
+      ctx.arc(moonX, moonY, moonRadius, Math.PI / 2, -Math.PI / 2)
+      ctx.lineTo(moonX, moonY - moonRadius)
+      ctx.fillStyle = illuminatedColor
+      ctx.fill()
+      const rx = moonRadius * Math.abs(1 - progress * 2)
+      if (rx > 0.5) {
+        ctx.beginPath()
+        ctx.ellipse(moonX, moonY, rx, moonRadius, 0, Math.PI / 2, -Math.PI / 2)
+        ctx.lineTo(moonX, moonY + moonRadius)
+        ctx.fillStyle = progress < 0.5
+          ? `rgba(30,30,40,${(0.85 * alphaScale).toFixed(4)})`
+          : illuminatedColor
+        ctx.fill()
+      }
+    }
+    ctx.restore()
+
+    if (illumination > 0.3) {
+      const marePairs = [
+        [0.15, -0.2, 0.28],
+        [-0.22, 0.1, 0.22],
+        [0.05, 0.25, 0.18],
+      ]
+      marePairs.forEach(([dx, dy, sr]) => {
+        ctx.beginPath()
+        ctx.arc(moonX + dx * moonRadius, moonY + dy * moonRadius, sr * moonRadius, 0, Math.PI * 2)
+        ctx.fillStyle = `rgba(160,155,140,${(illumination * 0.12 * alphaScale).toFixed(4)})`
+        ctx.fill()
       })
     }
   }
@@ -2199,14 +2728,6 @@
     const height = visualState.height
     ctx.save()
     ctx.globalAlpha = alphaScale
-
-    if (profile.clouds.length) {
-      profile.clouds.forEach((cloud) => {
-        cloud.x += cloud.speed
-        if (cloud.x - cloud.w > width) cloud.x = -cloud.w
-        drawBlobCloud(cloud, 1)
-      })
-    }
 
     if (profile.overlayColor) {
       ctx.fillStyle = profile.overlayColor
@@ -2256,7 +2777,7 @@
             spark.x += Math.sin(nowMs / 5000 + spark.y) * 0.08
           }
           if (spark.y < height * 0.4) {
-            spark.y = rand(height * 0.65, height * 0.94)
+            spark.y = rand(height * 0.45, height * 0.62)
             spark.x = rand(width * 0.2, width * 0.82)
           }
         })
@@ -2278,14 +2799,6 @@
       })
     }
 
-    if (profile.stars.length) {
-      profile.stars.forEach((star) => {
-        const twinkle = 0.5 + 0.5 * Math.sin(nowMs / star.period * Math.PI * 2 + star.phase)
-        ctx.fillStyle = `rgba(255,255,255,${(star.baseAlpha * twinkle * alphaScale).toFixed(4)})`
-        ctx.fillRect(star.x, star.y, 1.2, 1.2)
-      })
-    }
-
     if (profile.kind === 'fog') {
       const fogAlpha = 0.1 + Math.sin(nowMs / 15000 * Math.PI * 2) * 0.04
       const corners = [
@@ -2296,7 +2809,7 @@
       ]
       corners.forEach(([x, y]) => {
         const gradient = ctx.createRadialGradient(x, y, 0, width * 0.5, height * 0.5, width * 0.75)
-        const c = parseColor(profile.fog.color)
+        const c = cachedParseColor(profile.fog.color)
         gradient.addColorStop(0, `rgba(${c.r}, ${c.g}, ${c.b}, ${(fogAlpha * alphaScale).toFixed(4)})`)
         gradient.addColorStop(1, `rgba(${c.r}, ${c.g}, ${c.b}, 0)`)
         ctx.fillStyle = gradient
@@ -2317,6 +2830,288 @@
     ctx.restore()
   }
 
+  function getCanvasHintThemeWeight(hint) {
+    const isWarmHint = ['petals', 'fireworks', 'warm_glow', 'golden_dust', 'heat_shimmer', 'birthday_glow', 'snow_soft', 'autumn_leaves', 'warm_memory'].includes(hint)
+    return ['night', 'sunset'].includes(state.themeKey)
+      ? 1
+      : ['morning', 'noon'].includes(state.themeKey)
+        ? (isWarmHint ? 0.72 : 0.88)
+        : 0.84
+  }
+
+  function drawPetalsOverlay(nowMs, alphaScale) {
+    const petals = visualState.canvasHintSeeds.petals || []
+    const maxY = heroMaxY()
+    petals.forEach((petal) => {
+      petal.y += petal.speed
+      petal.rotation += petal.rotationSpeed
+      petal.x += Math.sin(nowMs / 5000 + petal.phase) * 0.12
+      if (petal.y < -12 || petal.y > maxY) {
+        petal.y = rand(-10, maxY * 0.2)
+        petal.x = rand(0, visualState.width)
+      }
+      ctx.save()
+      ctx.translate(petal.x + Math.sin(nowMs / 2200 + petal.phase) * petal.sway, petal.y)
+      ctx.rotate(petal.rotation)
+      ctx.fillStyle = `rgba(255, 235, 240, ${Math.min(0.25, alphaScale * rand(0.15, 0.25)).toFixed(4)})`
+      ctx.beginPath()
+      ctx.ellipse(0, 0, petal.size, petal.size * 0.66, Math.PI / 4, 0, Math.PI * 2)
+      ctx.fill()
+      ctx.restore()
+    })
+  }
+
+  function drawAutumnLeavesOverlay(nowMs, alphaScale) {
+    const leaves = visualState.canvasHintSeeds.autumnLeaves || []
+    const maxY = heroMaxY()
+    leaves.forEach((leaf) => {
+      leaf.y += leaf.speed
+      leaf.rotation += leaf.rotationSpeed
+      leaf.x += Math.sin(nowMs / 2600 + leaf.phase) * 0.16
+      if (leaf.y < -12 || leaf.y > maxY) {
+        leaf.y = rand(-10, maxY * 0.2)
+        leaf.x = rand(0, visualState.width)
+      }
+      ctx.save()
+      ctx.translate(leaf.x + Math.sin(nowMs / 2400 + leaf.phase) * leaf.sway, leaf.y)
+      ctx.rotate(leaf.rotation)
+      ctx.fillStyle = `rgba(218, 150, 84, ${Math.min(0.22, alphaScale * 0.18).toFixed(4)})`
+      ctx.beginPath()
+      ctx.ellipse(0, 0, leaf.size, leaf.size * 0.72, Math.PI / 7, 0, Math.PI * 2)
+      ctx.fill()
+      ctx.restore()
+    })
+  }
+
+  function drawWarmGlowOverlay(nowMs, alphaScale) {
+    const maxY = heroMaxY()
+    const pulse = 0.5 + 0.5 * Math.sin(nowMs / 12000 * Math.PI * 2)
+    const alpha = Math.min(0.14, (0.08 + pulse * 0.06) * alphaScale)
+    const gradient = ctx.createRadialGradient(
+      visualState.width * 0.5,
+      maxY,
+      0,
+      visualState.width * 0.5,
+      maxY,
+      visualState.width * 0.58
+    )
+    gradient.addColorStop(0, `rgba(255, 208, 160, ${alpha.toFixed(4)})`)
+    gradient.addColorStop(0.45, `rgba(212, 132, 90, ${(alpha * 0.7).toFixed(4)})`)
+    gradient.addColorStop(1, 'rgba(212, 132, 90, 0)')
+    ctx.fillStyle = gradient
+    ctx.fillRect(0, 0, visualState.width, visualState.height)
+  }
+
+  function drawSoftLightOverlay(nowMs, alphaScale) {
+    const pulse = 0.5 + 0.5 * Math.sin(nowMs / 20000 * Math.PI * 2)
+    const alpha = Math.min(0.12, (0.04 + pulse * 0.04) * alphaScale)
+    const gradient = ctx.createLinearGradient(0, 0, 0, visualState.height)
+    gradient.addColorStop(0, `rgba(255, 248, 220, ${alpha.toFixed(4)})`)
+    gradient.addColorStop(1, 'rgba(255, 248, 220, 0)')
+    ctx.fillStyle = gradient
+    ctx.fillRect(0, 0, visualState.width, visualState.height)
+  }
+
+  function drawGreyMistOverlay(nowMs, alphaScale) {
+    const bands = visualState.canvasHintSeeds.greyMist || []
+    const maxY = heroMaxY()
+    bands.forEach((band) => {
+      band.x -= band.speed
+      if (band.x + band.width < -40) band.x = visualState.width * 0.2
+      if (band.y < 0 || band.y > maxY) {
+        band.y = rand(visualState.height * 0.18, maxY * 0.86)
+      }
+      const gradient = ctx.createLinearGradient(band.x, band.y, band.x + band.width, band.y)
+      const alpha = Math.min(0.1, band.alpha * alphaScale)
+      gradient.addColorStop(0, 'rgba(180,180,190,0)')
+      gradient.addColorStop(0.5, `rgba(180,180,190,${alpha.toFixed(4)})`)
+      gradient.addColorStop(1, 'rgba(180,180,190,0)')
+      ctx.fillStyle = gradient
+      ctx.fillRect(band.x, band.y, band.width, band.height)
+    })
+  }
+
+  function drawGoldenDustOverlay(nowMs, alphaScale) {
+    const dust = visualState.canvasHintSeeds.goldenDust || []
+    const maxY = heroMaxY()
+    dust.forEach((particle) => {
+      particle.y -= particle.speed
+      particle.x += Math.sin(nowMs / 3000 + particle.phase) * 0.12
+      if (particle.y < -4 || particle.y > maxY) {
+        particle.y = rand(maxY * 0.3, maxY)
+        particle.x = rand(0, visualState.width)
+      }
+      ctx.fillStyle = `rgba(232, 200, 120, ${Math.min(0.2, particle.alpha * alphaScale).toFixed(4)})`
+      ctx.fillRect(particle.x, particle.y, particle.size, particle.size)
+    })
+  }
+
+  function drawMorningCrispOverlay(nowMs, alphaScale) {
+    const maxY = heroMaxY()
+    const pulse = 0.5 + 0.5 * Math.sin(nowMs / 10000 * Math.PI * 2)
+    const alpha = Math.min(0.1, (0.04 + pulse * 0.04) * alphaScale)
+    const gradient = ctx.createRadialGradient(
+      visualState.width * 0.5,
+      0,
+      0,
+      visualState.width * 0.5,
+      0,
+      Math.min(visualState.width * 0.55, maxY)
+    )
+    gradient.addColorStop(0, `rgba(160, 200, 224, ${alpha.toFixed(4)})`)
+    gradient.addColorStop(1, 'rgba(160, 200, 224, 0)')
+    ctx.fillStyle = gradient
+    ctx.fillRect(0, 0, visualState.width, visualState.height)
+  }
+
+  function drawHeatShimmerOverlay(nowMs, alphaScale) {
+    const bands = visualState.canvasHintSeeds.heatBands || []
+    const maxY = heroMaxY()
+    bands.forEach((band) => {
+      const offsetY = Math.sin(nowMs / band.speed * Math.PI * 2 + band.phase) * 8
+      let y = band.y + offsetY
+      if (y < 0 || y > maxY) {
+        band.y = rand(visualState.height * 0.2, maxY * 0.84)
+        y = band.y
+      }
+      const gradient = ctx.createLinearGradient(0, y, 0, y + band.height)
+      const alpha = Math.min(0.12, 0.04 * alphaScale)
+      gradient.addColorStop(0, 'rgba(255,200,100,0)')
+      gradient.addColorStop(0.5, `rgba(255,200,100,${alpha.toFixed(4)})`)
+      gradient.addColorStop(1, 'rgba(255,200,100,0)')
+      ctx.fillStyle = gradient
+      ctx.fillRect(-visualState.width * 0.1, y, band.width, band.height)
+    })
+  }
+
+  function drawBirthdayGlowOverlay(nowMs, alphaScale) {
+    const glows = visualState.canvasHintSeeds.birthdayGlows || []
+    const maxY = heroMaxY()
+    glows.forEach((glow) => {
+      if (glow.y < 0 || glow.y > maxY) {
+        glow.y = rand(visualState.height * 0.18, maxY * 0.52)
+      }
+      const pulse = 0.5 + 0.5 * Math.sin(nowMs / glow.speed * Math.PI * 2 + glow.phase)
+      drawRadialGlow(glow.x, glow.y, glow.radius, glow.color, Math.min(0.12, (0.03 + pulse * 0.09) * alphaScale))
+    })
+  }
+
+  function drawWarmMemoryOverlay(nowMs, alphaScale) {
+    const memory = visualState.canvasHintSeeds.warmMemory
+    if (!memory) return
+    const maxY = heroMaxY()
+    if (memory.y < 0 || memory.y > maxY) {
+      memory.y = rand(visualState.height * 0.28, maxY * 0.78)
+    }
+    const pulse = 0.5 + 0.5 * Math.sin(nowMs / 16000 * Math.PI * 2)
+    drawRadialGlow(
+      memory.x,
+      memory.y,
+      memory.radius,
+      '#C8A064',
+      Math.min(0.11, (0.06 + pulse * 0.05) * alphaScale)
+    )
+  }
+
+  function drawSnowSoftOverlay(nowMs, alphaScale) {
+    const flakes = visualState.canvasHintSeeds.snowSoft || []
+    const maxY = heroMaxY()
+    const glow = ctx.createRadialGradient(
+      visualState.width * 0.1,
+      maxY,
+      0,
+      visualState.width * 0.1,
+      maxY,
+      visualState.width * 0.3
+    )
+    glow.addColorStop(0, `rgba(255, 200, 120, ${Math.min(0.08, alphaScale * 0.08).toFixed(4)})`)
+    glow.addColorStop(1, 'rgba(255, 200, 120, 0)')
+    ctx.fillStyle = glow
+    ctx.fillRect(0, 0, visualState.width, visualState.height)
+
+    flakes.forEach((flake, index) => {
+      flake.y += flake.speed
+      flake.x += Math.sin(nowMs / 1400 + flake.driftSeed + index) * 0.08
+      if (flake.y < -6 || flake.y > maxY) {
+        flake.y = rand(-6, maxY * 0.2)
+        flake.x = rand(0, visualState.width)
+      }
+      ctx.beginPath()
+      ctx.fillStyle = `rgba(244, 244, 248, ${Math.min(0.22, flake.alpha * alphaScale).toFixed(4)})`
+      ctx.arc(flake.x, flake.y, flake.size, 0, Math.PI * 2)
+      ctx.fill()
+    })
+  }
+
+  function isFireworksWindow(now) {
+    const minutes = now.getHours() * 60 + now.getMinutes()
+    return minutes >= 23 * 60 + 30 || minutes <= 30
+  }
+
+  function drawFireworksOverlay(nowMs, alphaScale) {
+    const seed = visualState.canvasHintSeeds.fireworks
+    if (!seed || !isFireworksWindow(new Date(nowMs))) return
+    const maxY = heroMaxY()
+
+    if (seed.nextBurstAt === 0) {
+      seed.nextBurstAt = nowMs + rand(4000, 8000)
+    }
+    if (nowMs >= seed.nextBurstAt && seed.bursts.length < 3) {
+      const colors = ['rgba(255,220,160,ALPHA)', 'rgba(255,245,240,ALPHA)', 'rgba(224,170,176,ALPHA)']
+      seed.bursts.push({
+        x: rand(visualState.width * 0.12, visualState.width * 0.88),
+        y: rand(visualState.height * 0.08, Math.min(maxY * 0.48, visualState.height * 0.34)),
+        startedAt: nowMs,
+        lines: Array.from({ length: 16 }, (_, index) => ({
+          angle: (Math.PI * 2 * index) / 16,
+          length: rand(24, 46),
+          color: colors[index % colors.length],
+        })),
+      })
+      seed.nextBurstAt = nowMs + rand(4000, 8000)
+    }
+
+    seed.bursts = seed.bursts.filter((burst) => nowMs - burst.startedAt <= 1200)
+    seed.bursts.forEach((burst) => {
+      if (burst.y < 0 || burst.y > maxY) {
+        burst.y = rand(visualState.height * 0.08, Math.min(maxY * 0.48, visualState.height * 0.34))
+      }
+      const progress = clamp((nowMs - burst.startedAt) / 1200, 0, 1)
+      const lineAlpha = Math.min(0.2, (1 - progress) * alphaScale * 0.2)
+      burst.lines.forEach((line) => {
+        const distance = line.length * progress
+        ctx.strokeStyle = line.color.replace('ALPHA', lineAlpha.toFixed(4))
+        ctx.lineWidth = 1.1
+        ctx.beginPath()
+        ctx.moveTo(burst.x, burst.y)
+        ctx.lineTo(
+          burst.x + Math.cos(line.angle) * distance,
+          burst.y + Math.sin(line.angle) * distance
+        )
+        ctx.stroke()
+      })
+    })
+  }
+
+  function drawCanvasHint(nowMs, hint, alphaScale) {
+    if (!hint) return
+    if (alphaScale <= 0) return
+    withHeroClip(() => {
+      if (hint === 'petals') drawPetalsOverlay(nowMs, alphaScale)
+      else if (hint === 'autumn_leaves') drawAutumnLeavesOverlay(nowMs, alphaScale)
+      else if (hint === 'warm_glow') drawWarmGlowOverlay(nowMs, alphaScale)
+      else if (hint === 'soft_light') drawSoftLightOverlay(nowMs, alphaScale)
+      else if (hint === 'grey_mist') drawGreyMistOverlay(nowMs, alphaScale)
+      else if (hint === 'golden_dust') drawGoldenDustOverlay(nowMs, alphaScale)
+      else if (hint === 'morning_crisp') drawMorningCrispOverlay(nowMs, alphaScale)
+      else if (hint === 'heat_shimmer') drawHeatShimmerOverlay(nowMs, alphaScale)
+      else if (hint === 'birthday_glow') drawBirthdayGlowOverlay(nowMs, alphaScale)
+      else if (hint === 'warm_memory') drawWarmMemoryOverlay(nowMs, alphaScale)
+      else if (hint === 'snow_soft') drawSnowSoftOverlay(nowMs, alphaScale)
+      else if (hint === 'fireworks') drawFireworksOverlay(nowMs, alphaScale)
+    })
+  }
+
   async function refreshAmbientNow(force = false) {
     if (visualState.fetchingAmbient) return
     const nowMs = Date.now()
@@ -2327,11 +3122,14 @@
       const data = await response.json()
       if (data.weather) {
         state.weather = data.weather
+        state.astronomy = data.astronomy || buildFallbackAstronomy()
+        state.canvasHint = state.astronomy?.canvasHintActive || null
+        setCanvasHint(state.canvasHint)
         state.sunrise = data.sunrise || data.weather.sunrise || null
         state.sunset = data.sunset || data.weather.sunset || null
         state.sunriseTs = data.sunrise_ts || data.weather.sunriseTs || null
         state.sunsetTs = data.sunset_ts || data.weather.sunsetTs || null
-        startWeatherSystem(data.weather)
+        startWeatherSystem(data.weather, state.astronomy)
         renderHero()
       }
       visualState.lastWeatherFetchAt = nowMs
@@ -2361,11 +3159,33 @@
 
     const themed = getInterpolatedThemeState(nowMs)
     state.themeKey = themed.themeKey
-    setTheme(themed.themeState)
-    renderThemePreview()
+    inThemeTransition = themed.transitioning
+    const themeKeyChanged = themed.themeKey !== lastAppliedThemeKey
+    const forceKeyChanged = forcedThemeKey !== lastRenderedForceKey
+    if (themeKeyChanged || inThemeTransition) {
+      setTheme(themed.themeState, themed.themeKey)
+    }
+    if (themeKeyChanged || forceKeyChanged) {
+      renderThemePreview()
+      if (state.weather) initCloudSystem(state.weather, state.astronomy)
+      lastRenderedForceKey = forcedThemeKey
+    }
+    if (!inThemeTransition) {
+      lastAppliedThemeKey = themed.themeKey
+    }
 
     ctx.clearRect(0, 0, visualState.width, visualState.height)
+    const heroClipHeight = visualState.heroClipHeight
+    ctx.save()
+    ctx.beginPath()
+    ctx.rect(0, 0, visualState.width, heroClipHeight)
+    ctx.clip()
+
     drawPhaseBase(nowMs, state.themeKey, 1)
+    drawStarField(nowMs, state.astronomy, 1)
+    drawCloudSystem(nowMs, 1)
+    if (state.astronomy) drawSun(nowMs, state.astronomy, 1)
+    if (state.astronomy) drawMoon(nowMs, state.astronomy, 1)
 
     let currentAlpha = 1
     if (visualState.previousWeatherProfile) {
@@ -2375,6 +3195,12 @@
       if (transitionProgress >= 1) visualState.previousWeatherProfile = null
     }
     drawWeatherOverlay(visualState.currentWeatherProfile, nowMs, currentAlpha)
+    if (state.canvasHint) {
+      const fadeIn = Math.min(1, (nowMs - visualState.hintActivatedAt) / 3000)
+      drawCanvasHint(nowMs, state.canvasHint, fadeIn * getCanvasHintThemeWeight(state.canvasHint))
+    }
+
+    ctx.restore()
 
     if (nowMs - visualState.lastWeatherFetchAt >= 30 * 60000) {
       refreshAmbientNow()
@@ -2452,7 +3278,7 @@
               lon: position.coords.longitude,
             }),
           })
-          await loadInitialState()
+          await refreshAmbientNow(true)
         } catch {}
       },
       () => {},
@@ -2465,11 +3291,12 @@
   }
 
   resizeCanvas()
+  state.astronomy = buildFallbackAstronomy()
   const initialTheme = getInterpolatedThemeState(Date.now())
   state.themeKey = initialTheme.themeKey
-  setTheme(initialTheme.themeState)
+  setTheme(initialTheme.themeState, initialTheme.themeKey)
   renderAll()
-  startWeatherSystem(state.weather)
+  startWeatherSystem(state.weather, state.astronomy)
   loadInitialState().catch((error) => showError(error && error.stack ? error.stack : error))
   connectWs()
   refreshAmbientNow(true).catch(() => {})

@@ -3,11 +3,31 @@ const path = require('path')
 const { Lunar } = require('lunar-javascript')
 const state = require('./state')
 const { samplePool } = require('./songpool')
+const { getAstronomyContext } = require('./astronomy')
 
 const ROOT = path.join(__dirname, '..')
 let currentWeather = null
 const RECENT_RECOMMENDED_PREF = 'recent_recommended_keys_v1'
 const MAX_RECENT_RECOMMENDED_KEYS = 160
+const STORED_COORDS_PREF = 'user_coords_v1'
+const SOLAR_PHASE_LABELS = {
+  night: '深夜',
+  astronomical_dawn: '天文晨光',
+  nautical_dawn: '航海晨光',
+  civil_dawn: '民用晨光',
+  sunrise: '日出',
+  morning: '上午',
+  noon: '正午',
+  afternoon: '下午',
+  civil_dusk: '民用昏影',
+  nautical_dusk: '航海昏影',
+  astronomical_dusk: '天文昏影',
+}
+const shanghaiHourFormatter = new Intl.DateTimeFormat('en-GB', {
+  timeZone: 'Asia/Shanghai',
+  hour: '2-digit',
+  hour12: false,
+})
 
 function readFile(relPath) {
   try {
@@ -15,6 +35,63 @@ function readFile(relPath) {
   } catch {
     return ''
   }
+}
+
+function getStoredCoordinates() {
+  try {
+    const raw = state.getPref(STORED_COORDS_PREF)
+    if (!raw) return null
+    const parsed = JSON.parse(raw)
+    if (typeof parsed?.lat !== 'number' || typeof parsed?.lon !== 'number') return null
+    return { lat: parsed.lat, lon: parsed.lon, savedAt: parsed.savedAt || null }
+  } catch {
+    return null
+  }
+}
+
+function storeCoordinates(lat, lon) {
+  state.setPref(STORED_COORDS_PREF, JSON.stringify({
+    lat,
+    lon,
+    savedAt: new Date().toISOString(),
+  }))
+}
+
+function getShanghaiHour(date = new Date()) {
+  return Number(shanghaiHourFormatter.format(date))
+}
+
+function inferAmbientEmotion(astronomy, weather, hourOfDay) {
+  if (!astronomy) return []
+
+  const signals = []
+
+  if (hourOfDay >= 0 && hourOfDay < 4) signals.push('深夜孤独感')
+  if (hourOfDay >= 4 && hourOfDay < 6) signals.push('黎明前的静默')
+
+  if (astronomy.lunar.phaseName === 'full' && astronomy.lunar.isVisible) {
+    signals.push('满月情绪放大')
+  }
+  if (astronomy.lunar.phaseName === 'new') {
+    signals.push('新月内省')
+  }
+
+  if (weather?.main === 'Rain' && hourOfDay >= 20) {
+    signals.push('夜雨绵长')
+  }
+  if (weather?.main === 'Clear' && astronomy.solar.altitude < -6) {
+    signals.push('晴夜清醒')
+  }
+
+  if (astronomy.cultural.primaryMood) {
+    signals.push(astronomy.cultural.primaryMood)
+  }
+
+  if (astronomy.solarTerm.daysUntilNext <= 2) {
+    signals.push(`${astronomy.solarTerm.next}将至`)
+  }
+
+  return [...new Set(signals)]
 }
 
 function getLunarLabel(date = new Date()) {
@@ -203,6 +280,8 @@ async function fetchWeatherByCity() {
 
 async function getWeather() {
   if (currentWeather) return currentWeather
+  const coords = getStoredCoordinates()
+  if (coords) return fetchWeatherByCoords(coords.lat, coords.lon)
   return fetchWeatherByCity()
 }
 
@@ -213,17 +292,43 @@ async function getEnvironmentSnapshot() {
   const lunar = getLunarLabel(now)
   const sunriseText = weather.sunrise || '未知'
   const sunsetText = weather.sunset || '未知'
+  const coords = getStoredCoordinates()
+  const astronomy = coords
+    ? await getAstronomyContext(coords.lat, coords.lon, now.getTime()).catch(() => null)
+    : null
+  const inferredEmotions = inferAmbientEmotion(astronomy, weather, getShanghaiHour(now))
+  const astronomyText = astronomy
+    ? [
+        '【天文与文化背景】',
+        `${SOLAR_PHASE_LABELS[astronomy.solar.phase] || astronomy.solar.phase} · 太阳高度角 ${astronomy.solar.altitude.toFixed(1)}°`,
+        `月相：${astronomy.lunar.phaseName} · 照度 ${Math.round(astronomy.lunar.illumination * 100)}%`,
+        astronomy.lunar.isVisible ? '月亮可见' : '月亮未出',
+        `农历：${astronomy.lunarCalendar.yearName}年 ${astronomy.lunarCalendar.monthName}${astronomy.lunarCalendar.dayName}`,
+        `节气：${astronomy.solarTerm.current ? `今日${astronomy.solarTerm.current}` : `距${astronomy.solarTerm.next}还有${astronomy.solarTerm.daysUntilNext}天`}`,
+        `季节质感：${astronomy.seasonalQuality.label} · ${astronomy.seasonalQuality.atmosphericMood}`,
+        astronomy.cultural.festivals.length > 0
+          ? `文化节点：${astronomy.cultural.festivals.map(f => f.name).join('、')} · 情绪底色：${astronomy.cultural.primaryMood}`
+          : '',
+        astronomy.cultural.festivals.some(f => f.promptHint)
+          ? `文化提示：${astronomy.cultural.festivals.filter(f => f.promptHint).map(f => f.promptHint).join(' ')}` 
+          : '',
+        `星空能见度：${Math.round(astronomy.stars.visibility * 100)}%`,
+      ].filter(Boolean).join('\n')
+    : ''
 
   return {
     timeStr,
     weather,
     lunar,
-    envText: `当前时间：${timeStr}\n天气：${weather.text}\n农历：${lunar}\n日出：${sunriseText}\n日落：${sunsetText}`,
+    astronomy,
+    inferredEmotions,
+    envText: `当前时间：${timeStr}\n天气：${weather.text}\n农历：${lunar}\n日出：${sunriseText}\n日落：${sunsetText}${astronomyText ? `\n${astronomyText}` : ''}`,
   }
 }
 
 async function buildContext(userInput, options = {}) {
   const currentQueue = Array.isArray(options.currentQueue) ? options.currentQueue : []
+  const emotionSignal = options.emotionSignal || null
   const recentRecommendedKeys = new Set(loadRecentRecommendedKeys())
 
   // ① DJ 人格
@@ -237,6 +342,12 @@ async function buildContext(userInput, options = {}) {
   // ③ 环境注入
   const envSnapshot = await getEnvironmentSnapshot()
   const env = envSnapshot.envText
+  const inferredEmotionsText = envSnapshot.inferredEmotions?.length
+    ? `【此刻情绪推断】\n${envSnapshot.inferredEmotions.join(' · ')}\n请将以上情绪信号融入选曲判断，不必每个都体现，但整体基调应与这些信号和谐。`
+    : ''
+  const userEmotionText = emotionSignal
+    ? `【用户当下情绪信号】\n用户描述：「${userInput}」\n识别情绪：${emotionSignal.mood}\n选曲建议方向：${emotionSignal.suggestion}\n此信号优先级高于时段和天气，请以此为核心选曲。`
+    : ''
 
   // ④ 已检索记忆（去重后取最近 50 首）
   const recentMsgs = state.getRecentMessages(10)
@@ -300,6 +411,8 @@ async function buildContext(userInput, options = {}) {
     '---',
     '## 当前环境',
     env,
+    inferredEmotionsText,
+    userEmotionText,
     '---',
     `## 用户明确喜欢的歌\n${likedStr}`,
     `## 用户最近偏爱的艺人\n${likedArtistStr}`,
@@ -317,6 +430,7 @@ async function buildContext(userInput, options = {}) {
     '你必须且只能输出一个合法 JSON 对象，不含任何 markdown 包裹，格式如下：',
     '{"say":"播报文案，一次介绍这批歌的整体氛围（将被转为语音，100字以内）","play":[{"id":"0","name":"歌名（必须来自可选曲库）","artist":"艺人全名（必须来自可选曲库）"}],"reason":"内部选曲逻辑说明（不播报）","segue":"播完最后一首后衔接下一批的话"}',
     '【选曲规则】① play 数组包含 8-12 首 ② 所有歌曲必须来自上方"可选曲库"，歌名和艺人名保持原样 ③ 禁止推荐"用户明确不喜欢的歌"、"近期已播放"或"当前队列中已有的歌"里的任何一首 ④ 如果用户点过喜欢，优先延续这些歌或这些艺人的气质、编曲、情绪线索，但不要机械重复同一首 ⑤ 根据当前时间和用户品味从曲库中挑选最契合的几首 ⑥ 如果用户只是闲聊不涉及音乐，play 数组可为空',
+    '请根据以上天文与文化背景，结合时段和天气，选择在此刻听来最自然、最贴切的音乐。不要只考虑时段标签，要考虑今天这一天的具体质感。清明前后选曲应有感伤或宁静；梅雨季选曲应有绵长或慵懒；满月深夜选曲可以更空灵；节气当天可以选有仪式感的音乐。',
   ].join('\n')
 
   const messages = [
@@ -333,4 +447,7 @@ module.exports = {
   fetchWeatherByCity,
   getEnvironmentSnapshot,
   getWeather,
+  getStoredCoordinates,
+  storeCoordinates,
+  inferAmbientEmotion,
 }
