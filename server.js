@@ -357,6 +357,21 @@ function scoreNcmCandidate(song, expectedName, expectedArtistParts) {
     if (aliasHit) score += 16
   }
 
+  const coverKeywords = ['翻唱', 'cover', '致敬', '钢琴版', '吉他版', '纯音乐版', 'piano', 'acoustic', 'instrumental', 'tribute']
+  const nameLower = String(song?.name || '').toLowerCase()
+  const hasCoverKeyword = coverKeywords.some(kw => nameLower.includes(kw))
+  if (hasCoverKeyword) {
+    const artistMatch = expectedArtistParts.some(part =>
+      candidateArtists.some(n => n.includes(part) || part.includes(n))
+    )
+    if (!artistMatch) score -= 40
+  }
+
+  const fullArtistMatch = expectedArtistParts.length > 0 && expectedArtistParts.every(part =>
+    candidateArtists.some(n => n.includes(part) || part.includes(n))
+  )
+  if (fullArtistMatch) score += 15
+
   return score
 }
 
@@ -400,6 +415,14 @@ async function ncmSearch(name, artist) {
     }
     if (candidates.length >= 5) break
   }
+
+  const coverKws = ['翻唱', 'cover', '钢琴版', '吉他版', '纯音乐', 'piano', 'acoustic', 'instrumental', 'tribute']
+  candidates.forEach(c => {
+    const n = String(c.song?.name || '').toLowerCase()
+    if (coverKws.some(kw => n.includes(kw))) {
+      c.score -= 30
+    }
+  })
 
   candidates.sort((a, b) => b.score - a.score)
 
@@ -616,6 +639,8 @@ async function replenishQueueSilently(trigger = 'auto') {
 
 async function bootstrapStation() {
   try {
+    recentRecommendedKeys = []
+    state.setPref(RECENT_RECOMMENDED_PREF, JSON.stringify([]))
     await context.fetchWeatherByCity()
     const initialInput = '根据当前时间推荐几首歌'
     const result = await buildDjResponse(initialInput, {
