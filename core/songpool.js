@@ -69,6 +69,30 @@ function parseXiamiPlaylists(filePath) {
   return songs
 }
 
+function parseSpotifyPlaylists(dirPath) {
+  const songs = []
+  try {
+    if (!fs.existsSync(dirPath)) return songs
+    const files = fs.readdirSync(dirPath).filter(f => f.endsWith('.csv'))
+    for (const file of files) {
+      const lines = fs.readFileSync(path.join(dirPath, file), 'utf8').split(/\r?\n/)
+      for (let i = 1; i < lines.length; i++) {
+        const line = lines[i].trim()
+        if (!line) continue
+        const parts = line.match(/(".*?"|[^,]+)(?=,|$)/g)
+        if (!parts || parts.length < 4) continue
+        const name = parts[1].replace(/^"|"$/g, '').trim()
+        const rawArtist = parts[3].replace(/^"|"$/g, '').trim()
+        const artist = rawArtist.split(';')[0].trim()
+        if (name && artist) songs.push({ name, artist })
+      }
+    }
+  } catch (e) {
+    console.error('[songpool] Spotify 解析错误:', e.message)
+  }
+  return songs
+}
+
 // ── 加载 & 去重 ───────────────────────────────
 
 let _pool = null
@@ -79,8 +103,9 @@ function loadPool() {
   const ncm = parseNcmTxt(path.join(ROOT, 'user/ncm-playlist.txt'))
   const liked = parseXiamiLikedSongs(path.join(ROOT, 'user/收藏的歌曲.csv'))
   const playlists = parseXiamiPlaylists(path.join(ROOT, 'user/创建的歌单.csv'))
+  const spotify = parseSpotifyPlaylists(path.join(ROOT, 'user/spotify'))
 
-  const all = [...ncm, ...liked, ...playlists]
+  const all = [...ncm, ...liked, ...playlists, ...spotify]
 
   // 按 name::artist 去重
   const seen = new Set()
@@ -91,7 +116,7 @@ function loadPool() {
     return true
   })
 
-  console.log(`[songpool] 加载完成：${_pool.length} 首（NCM:${ncm.length} 虾米收藏:${liked.length} 虾米歌单:${playlists.length}）`)
+  console.log(`[songpool] 加载完成：${_pool.length} 首（NCM:${ncm.length} 虾米收藏:${liked.length} 虾米歌单:${playlists.length} Spotify:${spotify.length}）`)
   return _pool
 }
 
