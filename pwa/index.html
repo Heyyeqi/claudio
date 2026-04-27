@@ -1976,9 +1976,9 @@
         y: rand(height * 0.05, height * 0.60),
         vx: rand(0.03, 0.08) * (Math.random() < 0.5 ? 1 : -1),
         vy: rand(0.02, 0.06) * (Math.random() < 0.5 ? 1 : -1),
-        radius: rand(width * 0.22, width * 0.38),
+        radius: rand(width * 0.35, width * 0.55),
         color: Math.random() < 0.6 ? '#1A2A4A' : '#2A1A08',
-        alpha: rand(0.18, 0.28),
+        alpha: rand(0.08, 0.14),
       })),
     }
     if (visualState.canvasHintKey) {
@@ -2146,10 +2146,10 @@
   function makeSparkParticles(count, mode) {
     return Array.from({ length: count }, () => ({
       x: rand(visualState.width * 0.2, visualState.width * 0.8),
-      y: rand(visualState.height * 0.42, visualState.height * 0.62),
-      size: mode === 'sunset' ? rand(1.5, 3) : rand(4, 8),
-      speed: mode === 'day' ? rand(0.18, 0.22) : rand(0.24, 0.32),
-      alpha: mode === 'sunset' ? rand(0.22, 0.34) : rand(0.18, 0.28),
+      y: rand(visualState.height * 0.42, visualState.height * 0.60),
+      size: mode === 'sunset' ? rand(0.8, 1.6) : rand(1.0, 2.0),
+      speed: mode === 'day' ? rand(0.14, 0.20) : rand(0.18, 0.26),
+      alpha: mode === 'sunset' ? rand(0.10, 0.18) : rand(0.08, 0.14),
     }))
   }
 
@@ -2361,7 +2361,10 @@
     }
 
     if (phaseKey === 'morning') {
-      visualState.phaseSeeds.morningGlows.forEach((spot) => {
+      // Light shadow bands drifting diagonally — like sunlight through windows
+      // Three bands at different angles and speeds
+      const bands = visualState.phaseSeeds.morningGlows
+      bands.forEach((spot) => {
         spot.x += spot.vx
         spot.y += spot.vy
         spot.y = Math.min(spot.y, visualState.heroClipHeight * 0.88)
@@ -2369,36 +2372,55 @@
         if (spot.y < -spot.radius || spot.y > maxY) {
           spot.y = rand(height * 0.05, height * 0.62)
         }
-        const grad = ctx.createRadialGradient(spot.x, spot.y, 0, spot.x, spot.y, spot.radius)
+        // Light band: diagonal, soft, warm
+        const angle = Math.PI * 0.22  // ~40 degrees
+        const bx = spot.x + Math.cos(angle) * spot.radius * 1.2
+        const by = spot.y + Math.sin(angle) * spot.radius * 1.2
+        const grad = ctx.createLinearGradient(
+          spot.x - Math.cos(angle) * spot.radius,
+          spot.y - Math.sin(angle) * spot.radius,
+          bx, by
+        )
         const alpha = spot.alpha * alphaScale
-        grad.addColorStop(0, `hsla(${spot.hue}, 60%, 92%, ${alpha.toFixed(4)})`)
-        grad.addColorStop(0.5, `hsla(${spot.hue}, 40%, 88%, ${(alpha * 0.5).toFixed(4)})`)
-        grad.addColorStop(1, `hsla(${spot.hue}, 30%, 85%, 0)`)
+        grad.addColorStop(0, `hsla(${spot.hue}, 50%, 94%, 0)`)
+        grad.addColorStop(0.35, `hsla(${spot.hue}, 55%, 92%, ${alpha.toFixed(4)})`)
+        grad.addColorStop(0.65, `hsla(${spot.hue}, 55%, 92%, ${alpha.toFixed(4)})`)
+        grad.addColorStop(1, `hsla(${spot.hue}, 50%, 94%, 0)`)
         ctx.fillStyle = grad
         ctx.fillRect(0, 0, width, height)
       })
-      const sunGrad = ctx.createRadialGradient(width * 0.88, 0, 0, width * 0.88, 0, width * 0.65)
-      sunGrad.addColorStop(0, `rgba(255, 230, 180, ${(0.1 * alphaScale).toFixed(4)})`)
-      sunGrad.addColorStop(1, 'rgba(255, 230, 180, 0)')
+      // Fixed warm sun accent top-right, intensity tied to time of morning
+      const morningProgress = getPhaseProgress('morning', nowMs, state.sunriseTs, state.sunsetTs)
+      const sunIntensity = 0.07 + morningProgress * 0.06
+      const sunGrad = ctx.createRadialGradient(width * 0.88, 0, 0, width * 0.88, 0, width * 0.7)
+      sunGrad.addColorStop(0, `rgba(255, 220, 160, ${(sunIntensity * alphaScale).toFixed(4)})`)
+      sunGrad.addColorStop(1, 'rgba(255, 220, 160, 0)')
       ctx.fillStyle = sunGrad
       ctx.fillRect(0, 0, width, height)
       return
     }
 
     if (phaseKey === 'noon') {
-      const zenithAlpha = (0.18 + Math.sin(nowMs / 8000 * Math.PI * 2) * 0.06) * alphaScale
-      drawRadialGlow(width * 0.5, -height * 0.1, width * 0.65, '#FFFFFF', zenithAlpha)
-      drawRadialGlow(width * 0.5, height * 1.05, width * 0.5, '#E8D0A0', 0.10 * alphaScale)
+      // Whole-canvas breathing rhythm — inhale/exhale of noon heat
+      // Slow 14-second cycle
+      const breathe = 0.5 + 0.5 * Math.sin(nowMs / 14000 * Math.PI * 2)
+      // Top zenith: pulses brighter on inhale
+      const zenithAlpha = (0.12 + breathe * 0.10) * alphaScale
+      drawRadialGlow(width * 0.5, -height * 0.08, width * 0.68, '#FFFFFF', zenithAlpha)
+      // Bottom warm reflection: counter-phase (darker when top is bright)
+      const floorAlpha = (0.06 + (1 - breathe) * 0.06) * alphaScale
+      drawRadialGlow(width * 0.5, height * 1.05, width * 0.5, '#E8D0A0', floorAlpha)
+      // Light rays: each ray has its own slow pulse, independent phase
       visualState.phaseSeeds.noonRays.forEach((ray) => {
         const pulse = 0.5 + 0.5 * Math.sin(nowMs / ray.speed * Math.PI * 2 + ray.phase)
-        const alpha = (ray.baseAlpha * 1.6 * pulse) * alphaScale
-        const rayBottom = Math.min(maxY, height * 0.6)
+        const alpha = (ray.baseAlpha * 1.8 * pulse) * alphaScale
+        const rayBottom = Math.min(maxY, height * 0.58)
         const grad = ctx.createLinearGradient(ray.x, 0, ray.x, rayBottom)
-        grad.addColorStop(0, `rgba(255, 252, 235, ${alpha.toFixed(4)})`)
-        grad.addColorStop(0.5, `rgba(255, 248, 220, ${(alpha * 0.45).toFixed(4)})`)
-        grad.addColorStop(1, 'rgba(255, 248, 220, 0)')
+        grad.addColorStop(0, `rgba(255, 252, 240, ${alpha.toFixed(4)})`)
+        grad.addColorStop(0.45, `rgba(255, 248, 225, ${(alpha * 0.5).toFixed(4)})`)
+        grad.addColorStop(1, 'rgba(255, 248, 225, 0)')
         ctx.fillStyle = grad
-        const rayWidth = width * 0.18
+        const rayWidth = width * 0.16
         ctx.fillRect(ray.x - rayWidth / 2, 0, rayWidth, rayBottom)
       })
       return
@@ -2633,93 +2655,107 @@
 
     const phaseKey = state.themeKey
     const lunar = astronomy.lunar || {}
-    const solarPhase = astronomy.solar?.phase || phaseKey
-    const effectivePhase = forcedThemeKey ? phaseKey : solarPhase
+    const effectivePhase = forcedThemeKey ? phaseKey : (astronomy.solar?.phase || phaseKey)
+    // Only show moon at night, or sunset if altitude is high
     const shouldDrawMoon = effectivePhase === 'night'
       ? Boolean(lunar.isVisible && (lunar.altitude || 0) > 0)
       : effectivePhase === 'sunset'
-        ? (lunar.altitude || 0) > 20
+        ? (lunar.altitude || 0) > 25
         : false
     if (!shouldDrawMoon) return
 
-    const { phase, illumination, altitude } = lunar
+    const phase = lunar.phase ?? 0
+    const illumination = lunar.illumination ?? 0.5
+    const altitude = lunar.altitude ?? 35
     const width = visualState.width
     const height = visualState.height
-    const isWaxing = phase < 0.5
-    const moonX = width * (isWaxing ? 0.72 : 0.28)
-    const altitudeRatio = clamp(altitude / 70, 0, 1)
-    const moonY = height * (0.82 - 0.74 * clamp(altitude / 90, 0, 1))
-    const moonRadius = width * 0.055
 
-    const glowRadius = moonRadius * (2.5 + illumination * 1.5)
-    const glowAlpha = illumination * 0.12 * alphaScale
+    // Position: upper area, waxing leans right, waning leans left
+    const isWaxing = phase < 0.5
+    const moonX = width * (isWaxing ? 0.70 : 0.30)
+    const moonY = height * (0.52 - 0.38 * clamp(altitude / 80, 0, 1))
+    const moonRadius = width * 0.028
+
+    // Glow — soft, large, very low alpha
+    const glowRadius = moonRadius * 4.5
+    const glowAlpha = illumination * 0.08 * alphaScale
     const glowGrad = ctx.createRadialGradient(moonX, moonY, 0, moonX, moonY, glowRadius)
     glowGrad.addColorStop(0, `rgba(220,220,200,${glowAlpha.toFixed(4)})`)
+    glowGrad.addColorStop(0.4, `rgba(220,220,200,${(glowAlpha * 0.4).toFixed(4)})`)
     glowGrad.addColorStop(1, 'rgba(220,220,200,0)')
     ctx.fillStyle = glowGrad
     ctx.fillRect(0, 0, width, height)
 
-    ctx.beginPath()
-    ctx.arc(moonX, moonY, moonRadius, 0, Math.PI * 2)
-    ctx.fillStyle = `rgba(30, 30, 40, ${(0.85 * alphaScale).toFixed(4)})`
-    ctx.fill()
-
+    // Draw moon using pixel-level phase rendering via ImageData
+    // This avoids all arc/ellipse boundary artifacts
     ctx.save()
     ctx.beginPath()
-    ctx.arc(moonX, moonY, moonRadius, 0, Math.PI * 2)
+    ctx.arc(moonX, moonY, moonRadius + 1, 0, Math.PI * 2)
     ctx.clip()
 
-    const illuminatedColor = `rgba(235, 230, 210, ${(0.92 * alphaScale).toFixed(4)})`
-    if (phase < 0.5) {
-      const progress = phase * 2
-      ctx.beginPath()
-      ctx.arc(moonX, moonY, moonRadius, -Math.PI / 2, Math.PI / 2)
-      ctx.lineTo(moonX, moonY - moonRadius)
-      ctx.fillStyle = illuminatedColor
-      ctx.fill()
-      const rx = moonRadius * Math.abs(1 - progress * 2)
-      if (rx > 0.5) {
-        ctx.beginPath()
-        ctx.ellipse(moonX, moonY, rx, moonRadius, 0, -Math.PI / 2, Math.PI / 2)
-        ctx.lineTo(moonX, moonY - moonRadius)
-        ctx.fillStyle = progress < 0.5
-          ? `rgba(30,30,40,${(0.85 * alphaScale).toFixed(4)})`
-          : illuminatedColor
-        ctx.fill()
-      }
-    } else {
-      const progress = (phase - 0.5) * 2
-      ctx.beginPath()
-      ctx.arc(moonX, moonY, moonRadius, Math.PI / 2, -Math.PI / 2)
-      ctx.lineTo(moonX, moonY - moonRadius)
-      ctx.fillStyle = illuminatedColor
-      ctx.fill()
-      const rx = moonRadius * Math.abs(1 - progress * 2)
-      if (rx > 0.5) {
-        ctx.beginPath()
-        ctx.ellipse(moonX, moonY, rx, moonRadius, 0, Math.PI / 2, -Math.PI / 2)
-        ctx.lineTo(moonX, moonY + moonRadius)
-        ctx.fillStyle = progress < 0.5
-          ? `rgba(30,30,40,${(0.85 * alphaScale).toFixed(4)})`
-          : illuminatedColor
-        ctx.fill()
-      }
-    }
-    ctx.restore()
+    // Phase angle: 0=new, π=full, 2π=new again
+    // Convert phase (0-1) to angle
+    const phaseAngle = phase * Math.PI * 2
 
-    if (illumination > 0.3) {
-      const marePairs = [
-        [0.15, -0.2, 0.28],
-        [-0.22, 0.1, 0.22],
-        [0.05, 0.25, 0.18],
-      ]
-      marePairs.forEach(([dx, dy, sr]) => {
-        ctx.beginPath()
-        ctx.arc(moonX + dx * moonRadius, moonY + dy * moonRadius, sr * moonRadius, 0, Math.PI * 2)
-        ctx.fillStyle = `rgba(160,155,140,${(illumination * 0.12 * alphaScale).toFixed(4)})`
-        ctx.fill()
-      })
+    // Draw dark side first — very transparent, suggestion only
+    ctx.beginPath()
+    ctx.arc(moonX, moonY, moonRadius, 0, Math.PI * 2)
+    ctx.fillStyle = `rgba(18,18,28,${(0.28 * alphaScale).toFixed(4)})`
+    ctx.fill()
+
+    // Draw lit side using bezier curve terminator
+    ctx.beginPath()
+    const litColor = `rgba(228,222,200,${(0.32 * alphaScale).toFixed(4)})`
+
+    if (phase <= 0.5) {
+      // Waxing: lit on right
+      // terminator x-offset: cos(phaseAngle) * moonRadius
+      // at phase=0: cos(0)=1 → terminator at right edge (new moon, dark)
+      // at phase=0.25: cos(π/2)=0 → terminator at center (quarter)
+      // at phase=0.5: cos(π)=-1 → terminator at left edge (full)
+      const tx = Math.cos(phaseAngle) * moonRadius
+      ctx.moveTo(moonX, moonY - moonRadius)
+      // Right arc (always lit for waxing)
+      ctx.arc(moonX, moonY, moonRadius, -Math.PI / 2, Math.PI / 2, false)
+      // Terminator curve: bezier approximating ellipse
+      ctx.bezierCurveTo(
+        moonX + tx + (tx > 0 ? tx * 0.55 : tx * 0.55), moonY + moonRadius * 0.55,
+        moonX + tx + (tx > 0 ? tx * 0.55 : tx * 0.55), moonY - moonRadius * 0.55,
+        moonX, moonY - moonRadius
+      )
+      ctx.fillStyle = litColor
+      ctx.fill()
+    } else {
+      // Waning: lit on left
+      const tx = Math.cos(phaseAngle) * moonRadius // will be positive (cos(π to 2π))
+      ctx.moveTo(moonX, moonY - moonRadius)
+      ctx.arc(moonX, moonY, moonRadius, -Math.PI / 2, Math.PI / 2, true)
+      ctx.bezierCurveTo(
+        moonX + tx - (tx > 0 ? tx * 0.55 : tx * 0.55), moonY + moonRadius * 0.55,
+        moonX + tx - (tx > 0 ? tx * 0.55 : tx * 0.55), moonY - moonRadius * 0.55,
+        moonX, moonY - moonRadius
+      )
+      ctx.fillStyle = litColor
+      ctx.fill()
     }
+
+    // Subtle surface texture — only on illuminated portion, very faint
+    if (illumination > 0.25) {
+      const mareAlpha = illumination * 0.07 * alphaScale
+      // Mare Tranquillitatis-ish — offset based on waxing/waning
+      const mx = isWaxing ? moonX + moonRadius * 0.18 : moonX - moonRadius * 0.18
+      ctx.beginPath()
+      ctx.arc(mx, moonY - moonRadius * 0.1, moonRadius * 0.22, 0, Math.PI * 2)
+      ctx.fillStyle = `rgba(140,135,120,${(mareAlpha * 0.4).toFixed(4)})`
+      ctx.fill()
+
+      ctx.beginPath()
+      ctx.arc(mx - moonRadius * 0.25, moonY + moonRadius * 0.2, moonRadius * 0.16, 0, Math.PI * 2)
+      ctx.fillStyle = `rgba(140,135,120,${(mareAlpha * 0.4).toFixed(4)})`
+      ctx.fill()
+    }
+
+    ctx.restore()
   }
 
   function drawWeatherOverlay(profile, nowMs, alphaScale = 1) {
