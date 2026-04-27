@@ -32,6 +32,10 @@
 
   * { box-sizing: border-box; }
 
+  * {
+    -webkit-tap-highlight-color: transparent;
+  }
+
   html, body {
     margin: 0;
     min-height: 100%;
@@ -199,6 +203,7 @@
     letter-spacing: 0.02em;
     color: var(--text-main);
     text-wrap: balance;
+    -webkit-text-size-adjust: 100%;
     word-break: break-word;
     overflow-wrap: break-word;
   }
@@ -344,15 +349,23 @@
     transform: translateY(0);
   }
 
+  .drawer.open .drawer-handle-arrow {
+    transform: rotate(180deg);
+  }
+
   .drawer-handle {
     appearance: none;
     border: 0;
     background: transparent;
     color: var(--text-dim);
-    padding: 14px 28px 10px;
+    padding: 12px 28px;
     cursor: pointer;
     position: relative;
     z-index: 3;
+    width: 100%;
+    display: flex;
+    align-items: center;
+    justify-content: center;
   }
 
   .drawer-handle-line {
@@ -365,9 +378,10 @@
 
   .drawer-handle-line::before {
     content: "";
-    width: 96px;
-    height: 2px;
-    background: var(--line);
+    width: 40px;
+    height: 3px;
+    border-radius: 2px;
+    background: rgba(240, 237, 232, 0.25);
     position: absolute;
   }
 
@@ -419,7 +433,7 @@
     display: grid;
     grid-template-columns: 24px 1fr;
     gap: 10px;
-    align-items: start;
+    align-items: center;
     text-align: left;
     cursor: pointer;
     border-bottom: 1px solid var(--line);
@@ -440,7 +454,7 @@
 
   .queue-item-num.queue-item-playing {
     color: var(--accent);
-    font-size: 14px;
+    font-size: 10px;
   }
 
   .queue-item-title {
@@ -588,7 +602,9 @@
   .composer-input {
     width: 100%;
     appearance: none;
+    -webkit-appearance: none;
     border: 1px solid var(--line);
+    border-radius: 0;
     background: rgba(255,255,255,0.14);
     color: var(--text-main);
     min-height: 48px;
