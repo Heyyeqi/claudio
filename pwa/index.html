@@ -1379,6 +1379,12 @@
       renderHero()
       renderControls()
     }
+    const validKeys = new Set((localQueue || []).map(item =>
+      item?.song_info ? item.song_info.name + '::' + item.song_info.artist : ''
+    ).filter(Boolean))
+    for (const key of prefetchCache.keys()) {
+      if (!validKeys.has(key)) prefetchCache.delete(key)
+    }
   }
 
   async function sendFeedback(action) {
@@ -1486,6 +1492,7 @@
     if (autoExplain) {
       maybeAutoExplain(item)
     }
+    setTimeout(prefetchNextExplain, 2000)
   }
 
   function cleanupVoiceDucking() {
@@ -1564,6 +1571,35 @@
       return true
     }
     return false
+  }
+
+  const prefetchCache = new Map()
+
+  async function prefetchNextExplain() {
+    if (localQueue.length === 0) return
+    const next = localQueue[0]
+    if (!next?.song_info) return
+    const key = next.song_info.name + '::' + next.song_info.artist
+    if (prefetchCache.has(key)) return
+    try {
+      const res = await fetch('/api/explain', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          name: next.song_info.name,
+          artist: next.song_info.artist,
+          user_input: '无',
+          theme_name: state.themeKey || '深夜',
+        }),
+      })
+      const data = await res.json()
+      if (data.explain_text) {
+        prefetchCache.set(key, {
+          explain_text: data.explain_text,
+          say_audio: data.say_audio || null,
+        })
+      }
+    } catch {}
   }
 
   async function advanceToNext() {
@@ -1755,6 +1791,16 @@
   }
 
   async function explainCurrentTrack() {
+    if (state.currentTrack) {
+      const key = state.currentTrack.name + '::' + state.currentTrack.artist
+      const cached = prefetchCache.get(key)
+      if (cached) {
+        appendCommentary(cached.explain_text)
+        if (cached.say_audio) playVoice(cached.say_audio, true)
+        prefetchCache.delete(key)
+        return
+      }
+    }
     return explainTrack(state.currentTrack, {})
   }
 
