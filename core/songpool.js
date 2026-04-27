@@ -21,11 +21,12 @@ function parseNcmTxt(filePath) {
     for (const line of lines) {
       const trimmed = line.trim()
       if (!trimmed) continue
-      // 格式: 歌名 - 艺人名
-      const idx = trimmed.lastIndexOf(' - ')
+      // 格式: 歌名 - 艺人名 / 歌名 – 艺人名 / 歌名 — 艺人名
+      const sep = trimmed.match(/ [-–—] /)
+      const idx = sep ? sep.index : -1
       if (idx === -1) continue
       const name = trimmed.slice(0, idx).trim()
-      const artist = trimmed.slice(idx + 3).trim()
+      const artist = trimmed.slice(idx + sep[0].length).trim()
       if (name && artist) songs.push({ name, artist })
     }
   } catch { /* 文件不存在时静默 */ }
