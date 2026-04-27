@@ -1568,6 +1568,12 @@
 
   async function advanceToNext() {
     hasUnlockedAudio = true
+
+    // 低水位触发：队列剩余少于3首时，静默向服务端请求补充
+    if (localQueue.length <= 3) {
+      fetch('/api/next?peek=1').catch(() => {})
+    }
+
     if (localQueue.length > 0) {
       const next = localQueue.shift()
       state.queue = localQueue.slice()
@@ -1575,8 +1581,25 @@
       playSong(next)
       return
     }
+
+    // 本地队列空了，从服务端取
     try {
-      await fetchServerNext()
+      const ok = await fetchServerNext()
+      if (!ok) {
+        // 服务端也没有，主动触发 DJ 重新选曲
+        const res = await fetch('/api/chat', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ input: '继续播' }),
+        })
+        const data = await res.json()
+        if (data.queue && data.queue.length > 0) {
+          setLocalQueue(data.queue)
+          if (data.say) appendDj(data.say)
+          if (data.say_audio) playVoice(data.say_audio, true)
+          else advanceToNext()
+        }
+      }
     } catch {}
   }
 
