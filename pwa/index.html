@@ -1015,14 +1015,17 @@
 
     spotifyPlayer.addListener('player_state_changed', (s) => {
       if (!s) return
+      const wasPlaying = state.playing
+      const currentUri = s.track_window && s.track_window.current_track && s.track_window.current_track.uri
       syncCurrentTrackFromSpotifyState(s)
       state.playing = !s.paused
       state.progress = s.position / 1000
       state.duration = s.duration / 1000
       renderControls()
       renderProgress()
-      // 歌曲自然结束
-      if (s.paused && s.position === 0 && s.restrictions?.disallow_resuming_reasons?.includes('not_paused')) {
+      // 只在“先前正在播放、现在已经结束”的情况下推进下一首
+      if (wasPlaying && s.paused && s.position === 0 && currentUri && currentUri === spotifyCurrentUri) {
+        spotifyCurrentUri = null
         advanceToNext()
       }
     })
@@ -1599,7 +1602,8 @@
     localQueue = Array.isArray(items) ? items.slice() : []
     state.queue = localQueue.slice()
     renderQueue()
-    if (!audio.src && localQueue.length > 0) {
+    const hasActivePlayback = !!audio.src || !!spotifyCurrentUri || !!pendingSpotifyItem || state.playing
+    if (!hasActivePlayback && localQueue.length > 0) {
       state.currentTrack = localQueue[0].song_info || null
       renderHero()
       renderControls()
@@ -1792,7 +1796,8 @@
   }
 
   function ensurePrimaryPlayback() {
-    if (!audio.src) {
+    if (spotifyCurrentUri && !spotifyReady) return
+    if (!audio.src && !spotifyCurrentUri) {
       if (localQueue.length > 0) advanceToNext()
       return
     }
@@ -2180,8 +2185,15 @@
       stopVoicePlayback()
     }
     // Spotify 模式
-    if (spotifyCurrentUri && spotifyReady) {
-      spotifyToggle()
+    if (spotifyCurrentUri) {
+      if (spotifyReady) {
+        spotifyToggle()
+      } else if (spotifyPlayer) {
+        appendDj('Spotify 正在准备，马上开始。')
+      } else if (localQueue.length > 0) {
+        pendingSpotifyItem = { item: localQueue[0], options: { recordHistory: true, autoExplain: true } }
+        initSpotifyPlayer().catch(() => {})
+      }
       return
     }
     // NCM 模式
