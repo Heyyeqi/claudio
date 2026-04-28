@@ -29,6 +29,17 @@ const shanghaiHourFormatter = new Intl.DateTimeFormat('en-GB', {
   hour12: false,
 })
 
+async function fetchJsonWithTimeout(url, options = {}, timeoutMs = 8000) {
+  const controller = new AbortController()
+  const timer = setTimeout(() => controller.abort(), timeoutMs)
+  try {
+    const res = await fetch(url, { ...options, signal: controller.signal })
+    return res
+  } finally {
+    clearTimeout(timer)
+  }
+}
+
 function readFile(relPath) {
   try {
     return fs.readFileSync(path.join(ROOT, relPath), 'utf8')
@@ -191,7 +202,7 @@ async function fetchCityLabelByCoords(lat, lon, fallbackLabel) {
   try {
     // 用 Nominatim（OpenStreetMap）反地理编码，精度到区县级，免费无需 Key
     const url = `https://nominatim.openstreetmap.org/reverse?lat=${lat}&lon=${lon}&format=json&accept-language=zh,en&zoom=12`
-    const res = await fetch(url, {
+    const res = await fetchJsonWithTimeout(url, {
       headers: { 'User-Agent': 'Claudio/1.0 (personal music app)' }
     })
     const data = await res.json()
@@ -248,7 +259,7 @@ async function fetchCityLabelByCoords(lat, lon, fallbackLabel) {
       const key = process.env.WEATHER_API_KEY
       if (!key || key === 'xxxxxxxx') return normalizeCityName(fallbackLabel, '当前位置')
       const url = `https://api.openweathermap.org/geo/1.0/reverse?lat=${lat}&lon=${lon}&limit=1&appid=${key}`
-      const res = await fetch(url)
+      const res = await fetchJsonWithTimeout(url)
       const geoData = await res.json()
       const place = Array.isArray(geoData) ? geoData[0] : null
       if (!place) return normalizeCityName(fallbackLabel, '当前位置')
@@ -277,7 +288,7 @@ async function fetchWeatherByCoords(lat, lon) {
   try {
     const url = `https://api.openweathermap.org/data/2.5/weather?lat=${lat}&lon=${lon}&appid=${key}&units=metric&lang=zh_cn`
     const [res, cityLabel] = await Promise.all([
-      fetch(url),
+      fetchJsonWithTimeout(url),
       fetchCityLabelByCoords(lat, lon, '当前位置'),
     ])
     const data = await res.json()
@@ -309,7 +320,7 @@ async function fetchWeatherByCity() {
 
   try {
     const url = `https://api.openweathermap.org/data/2.5/weather?q=${encodeURIComponent(city)}&appid=${key}&units=metric&lang=zh_cn`
-    const res = await fetch(url)
+    const res = await fetchJsonWithTimeout(url)
     const data = await res.json()
     currentWeather = formatWeather(data, city)
     return currentWeather

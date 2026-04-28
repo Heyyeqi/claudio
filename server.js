@@ -33,6 +33,14 @@ const app = express()
 const server = http.createServer(app)
 const wss = new WebSocket.Server({ server, path: '/stream' })
 
+process.on('unhandledRejection', error => {
+  console.error('[claudio] 未处理的 Promise 拒绝:', error)
+})
+
+process.on('uncaughtException', error => {
+  console.error('[claudio] 未捕获异常:', error)
+})
+
 const wsClients = []
 let latestStationPayload = null
 wss.on('connection', ws => {

@@ -8,12 +8,22 @@ let userAccessToken = null      // 用于播放（需要用户授权）
 let userRefreshToken = null
 let userTokenExpiresAt = 0
 
+async function fetchJsonWithTimeout(url, options = {}, timeoutMs = 8000) {
+  const controller = new AbortController()
+  const timer = setTimeout(() => controller.abort(), timeoutMs)
+  try {
+    return await fetch(url, { ...options, signal: controller.signal })
+  } finally {
+    clearTimeout(timer)
+  }
+}
+
 // ── Client Credentials Token（搜索用）───────────────────────────
 async function getClientCredToken() {
   if (clientCredToken && clientCredToken.expiresAt > Date.now() + 30000) {
     return clientCredToken.access_token
   }
-  const res = await fetch('https://accounts.spotify.com/api/token', {
+  const res = await fetchJsonWithTimeout('https://accounts.spotify.com/api/token', {
     method: 'POST',
     headers: {
       'Content-Type': 'application/x-www-form-urlencoded',
@@ -51,7 +61,7 @@ function getAuthUrl(state = '') {
 
 // ── 用 code 换 token ─────────────────────────────────────────────
 async function exchangeCode(code) {
-  const res = await fetch('https://accounts.spotify.com/api/token', {
+  const res = await fetchJsonWithTimeout('https://accounts.spotify.com/api/token', {
     method: 'POST',
     headers: {
       'Content-Type': 'application/x-www-form-urlencoded',
@@ -74,7 +84,7 @@ async function exchangeCode(code) {
 // ── 刷新 User Token ──────────────────────────────────────────────
 async function refreshUserToken() {
   if (!userRefreshToken) throw new Error('No refresh token')
-  const res = await fetch('https://accounts.spotify.com/api/token', {
+  const res = await fetchJsonWithTimeout('https://accounts.spotify.com/api/token', {
     method: 'POST',
     headers: {
       'Content-Type': 'application/x-www-form-urlencoded',
@@ -110,7 +120,7 @@ function hasUserToken() {
 async function searchTrack(name, artist) {
   const token = await getClientCredToken()
   const q = encodeURIComponent(`track:${name} artist:${artist}`)
-  const res = await fetch(
+  const res = await fetchJsonWithTimeout(
     `https://api.spotify.com/v1/search?q=${q}&type=track&limit=3&market=TW`,
     { headers: { Authorization: `Bearer ${token}` } }
   )
