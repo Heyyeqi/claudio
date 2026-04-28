@@ -1473,7 +1473,7 @@
       heroTitle.style.lineHeight = '1.1'
     }
     heroArtist.textContent = state.currentTrack && state.currentTrack.artist ? state.currentTrack.artist : 'RodiO FM'
-    const cityLine = state.weather && (state.weather.cityLine || state.weather.city || state.weather.locationName)
+    const cityLine = state.weather && state.weather.cityLine
     const areaLine = state.weather && (state.weather.areaLine || '')
     heroCity.innerHTML = cityLine
       ? `<span class="hero-city-line primary">${escapeHtml(String(cityLine))}</span>${areaLine ? `<span class="hero-city-line secondary">${escapeHtml(String(areaLine))}</span>` : ''}`
