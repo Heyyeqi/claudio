@@ -766,8 +766,8 @@ app.use(express.json())
 
 app.get('/manifest.json', (req, res) => {
   res.json({
-    name: 'Claudio FM',
-    short_name: 'Claudio',
+    name: 'RodiO FM',
+    short_name: 'RodiO',
     start_url: '/',
     display: 'standalone',
     background_color: '#0E0E0E',
