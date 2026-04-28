@@ -1529,14 +1529,24 @@
       playedHistory.push({ song_info: state.currentTrack, play_url: audio.src })
       if (playedHistory.length > 30) playedHistory = playedHistory.slice(-30)
     }
+    // 确保音频格式支持
+    if (!item.play_url) return
+    try {
+      audio.pause()
+      audio.src = ''
+      audio.load()
+    } catch (e) {}
     audio.src = item.play_url
+    audio.load()
     audio.play().then(() => {
       state.playing = true
       renderControls()
-    }).catch((error) => {
+    }).catch((e) => {
       state.playing = false
       renderControls()
-      appendDj(`播放失败：${error && error.name ? error.name : 'AudioError'}`)
+      console.error('[claudio] 播放失败:', e.name, e.message)
+      appendDj(`播放失败，跳到下一首`)
+      setTimeout(() => advanceToNext(), 1500)
     })
     state.currentTrack = item.song_info || null
     state.progress = 0
@@ -2030,13 +2040,7 @@
   }
 
   function withHeroClip(drawer) {
-    const limit = heroMaxY()
-    ctx.save()
-    ctx.beginPath()
-    ctx.rect(0, 0, visualState.width, limit)
-    ctx.clip()
-    drawer(limit)
-    ctx.restore()
+    drawer(visualState.height)
   }
 
   function fillRadialGradientBounds(cx, cy, radius, width = visualState.width, clipHeight = visualState.heroClipHeight || visualState.height) {
@@ -2781,6 +2785,29 @@
     })
   }
 
+  function getSunMoonTransitionAlpha(themeKey, nowMs, sunriseTs, sunsetTs) {
+    // 日出模式：月亮淡出，太阳淡入（日出前30分钟到日出后30分钟）
+    if (themeKey === 'sunrise') {
+      const progress = getPhaseProgress('sunrise', nowMs, sunriseTs, sunsetTs)
+      return {
+        sunAlpha: Math.min(1, progress * 2),       // 前半段太阳淡入
+        moonAlpha: Math.max(0, 1 - progress * 2),  // 前半段月亮淡出
+      }
+    }
+    // 落日模式：太阳淡出，月亮淡入
+    if (themeKey === 'sunset') {
+      const progress = getPhaseProgress('sunset', nowMs, sunriseTs, sunsetTs)
+      return {
+        sunAlpha: Math.max(0, 1 - progress * 1.5),  // 落日太阳淡出
+        moonAlpha: Math.min(1, Math.max(0, progress * 1.5 - 0.5)), // 后半段月亮淡入
+      }
+    }
+    // 其他时段
+    if (themeKey === 'night') return { sunAlpha: 0, moonAlpha: 1 }
+    if (themeKey === 'morning' || themeKey === 'noon') return { sunAlpha: 1, moonAlpha: 0 }
+    return { sunAlpha: 1, moonAlpha: 0 }
+  }
+
   function drawSun(nowMs, astronomy, alphaScale) {
     if (!astronomy) return
     const { altitude, azimuth } = astronomy.solar
@@ -2858,8 +2885,8 @@
     const moonRadius = width * 0.028
 
     // Glow — soft, large, very low alpha
-    const glowRadius = moonRadius * 4.5
-    const glowAlpha = illumination * 0.22 * alphaScale
+    const glowRadius = moonRadius * 4
+    const glowAlpha = illumination * 0.10 * alphaScale
     const glowGrad = ctx.createRadialGradient(moonX, moonY, 0, moonX, moonY, glowRadius)
     glowGrad.addColorStop(0, `rgba(220,220,200,${glowAlpha.toFixed(4)})`)
     glowGrad.addColorStop(0.4, `rgba(220,220,200,${(glowAlpha * 0.4).toFixed(4)})`)
@@ -3392,17 +3419,22 @@
     }
 
     ctx.clearRect(0, 0, visualState.width, visualState.height)
-    const heroClipHeight = visualState.heroClipHeight
+    const heroClipHeight = visualState.height
     ctx.save()
     ctx.beginPath()
-    ctx.rect(0, 0, visualState.width, heroClipHeight)
+    ctx.rect(0, 0, visualState.width, visualState.height)
     ctx.clip()
 
     drawPhaseBase(nowMs, state.themeKey, 1)
     drawStarField(nowMs, state.astronomy, 1)
     drawCloudSystem(nowMs, 1)
-    if (state.astronomy) drawSun(nowMs, state.astronomy, 1)
-    if (state.astronomy) drawMoon(nowMs, state.astronomy, 1)
+    if (state.astronomy) {
+      const { sunAlpha, moonAlpha } = getSunMoonTransitionAlpha(
+        state.themeKey, nowMs, state.sunriseTs, state.sunsetTs
+      )
+      if (sunAlpha > 0.01) drawSun(nowMs, state.astronomy, sunAlpha)
+      if (moonAlpha > 0.01) drawMoon(nowMs, state.astronomy, moonAlpha)
+    }
 
     let currentAlpha = 1
     if (visualState.previousWeatherProfile) {
