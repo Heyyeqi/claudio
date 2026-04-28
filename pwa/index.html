@@ -946,6 +946,7 @@
   let spotifyReady = false
   let spotifyCurrentUri = null
   let spotifyProgressTimer = null
+  let pendingSpotifyItem = null
 
   function syncCurrentTrackFromSpotifyState(s) {
     const track = s && s.track_window && s.track_window.current_track
@@ -1000,6 +1001,11 @@
       spotifyDeviceId = device_id
       spotifyReady = true
       console.log('[spotify] Player ready, device:', device_id)
+      if (pendingSpotifyItem) {
+        const pending = pendingSpotifyItem
+        pendingSpotifyItem = null
+        playSong(pending.item, pending.options)
+      }
     })
 
     spotifyPlayer.addListener('not_ready', ({ device_id }) => {
@@ -1723,11 +1729,14 @@
     }
 
     if (item.spotify_uri) {
-      state.currentTrack = prevTrack
-      renderHero()
-      renderControls()
-      appendDj('Spotify 还没准备好，先跳过这首。')
-      setTimeout(() => advanceToNext(), 800)
+      pendingSpotifyItem = {
+        item,
+        options: { recordHistory, autoExplain },
+      }
+      appendDj('Spotify 正在准备，马上开始。')
+      if (!spotifyPlayer) {
+        initSpotifyPlayer().catch(() => {})
+      }
       return
     }
 
