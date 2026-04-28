@@ -366,11 +366,14 @@
     flex-shrink: 0;
     touch-action: manipulation;
     -webkit-tap-highlight-color: transparent;
+    position: sticky;
+    top: 0;
+    flex-shrink: 0;
   }
 
   .drawer-handle-bar {
     display: block;
-    width: 32px;
+    width: 56px;
     height: 1.5px;
     background: var(--line);
     border-radius: 1px;
@@ -799,6 +802,8 @@
       <button class="drawer-handle" id="drawer-toggle" type="button" aria-label="Toggle drawer">
         <span class="drawer-handle-bar"></span>
       </button>
+
+      <div id="drawer-close" style="display:none"></div>
 
       <div class="drawer-content">
         <div class="queue-panel">
@@ -1338,6 +1343,16 @@
 
   function toggleDrawer() {
     state.drawerOpen = !state.drawerOpen
+    renderDrawer()
+  }
+
+  function closeDrawer() {
+    state.drawerOpen = false
+    renderDrawer()
+  }
+
+  function openDrawer() {
+    state.drawerOpen = true
     renderDrawer()
   }
 
