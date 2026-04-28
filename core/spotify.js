@@ -1,7 +1,9 @@
 // ── Spotify 模块 ─────────────────────────────────────────────────
+const state = require('./state')
 const CLIENT_ID = process.env.SPOTIFY_CLIENT_ID
 const CLIENT_SECRET = process.env.SPOTIFY_CLIENT_SECRET
 const REDIRECT_URI = process.env.SPOTIFY_REDIRECT_URI || 'https://web-production-a5193.up.railway.app/callback'
+const SPOTIFY_TOKEN_PREF = 'spotify_user_token_v1'
 
 let clientCredToken = null      // 用于搜索（不需要用户授权）
 let userAccessToken = null      // 用于播放（需要用户授权）
@@ -17,6 +19,32 @@ async function fetchJsonWithTimeout(url, options = {}, timeoutMs = 8000) {
     clearTimeout(timer)
   }
 }
+
+function loadPersistedUserToken() {
+  try {
+    const raw = state.getPref(SPOTIFY_TOKEN_PREF)
+    if (!raw) return
+    const parsed = JSON.parse(raw)
+    if (parsed?.refresh_token) userRefreshToken = parsed.refresh_token
+    if (parsed?.access_token) userAccessToken = parsed.access_token
+    if (typeof parsed?.expires_at === 'number') userTokenExpiresAt = parsed.expires_at
+  } catch {}
+}
+
+function persistUserToken() {
+  try {
+    state.setPref(SPOTIFY_TOKEN_PREF, JSON.stringify({
+      access_token: userAccessToken,
+      refresh_token: userRefreshToken,
+      expires_at: userTokenExpiresAt,
+      updated_at: Date.now(),
+    }))
+  } catch (e) {
+    console.error('[spotify] 保存 token 失败:', e.message)
+  }
+}
+
+loadPersistedUserToken()
 
 // ── Client Credentials Token（搜索用）───────────────────────────
 async function getClientCredToken() {
@@ -78,6 +106,7 @@ async function exchangeCode(code) {
   userAccessToken = data.access_token
   userRefreshToken = data.refresh_token
   userTokenExpiresAt = Date.now() + (data.expires_in - 60) * 1000
+  persistUserToken()
   return data
 }
 
@@ -100,20 +129,24 @@ async function refreshUserToken() {
   userAccessToken = data.access_token
   userTokenExpiresAt = Date.now() + (data.expires_in - 60) * 1000
   if (data.refresh_token) userRefreshToken = data.refresh_token
+  persistUserToken()
   return userAccessToken
 }
 
 // ── 获取有效的 User Token ────────────────────────────────────────
 async function getUserToken() {
-  if (!userAccessToken) return null
+  if (!userAccessToken && !userRefreshToken) return null
   if (Date.now() > userTokenExpiresAt) {
     try { await refreshUserToken() } catch { return null }
+  }
+  if (!userAccessToken && userRefreshToken) {
+    try { return await refreshUserToken() } catch { return null }
   }
   return userAccessToken
 }
 
 function hasUserToken() {
-  return !!userAccessToken
+  return !!userAccessToken || !!userRefreshToken
 }
 
 // ── 搜索曲目，返回 Spotify Track ID ─────────────────────────────
