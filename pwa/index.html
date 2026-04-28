@@ -112,7 +112,7 @@
     position: relative;
     flex: 1;
     min-height: 0;
-    padding: 20px 28px 0;
+    padding: 16px 28px 0;
     display: flex;
     flex-direction: column;
     overflow: hidden;
@@ -205,7 +205,8 @@
     align-items: center;
     justify-content: center;
     text-align: center;
-    padding-bottom: 16px;
+    padding-top: 20px;
+    padding-bottom: 24px;
   }
 
   .hero-title {
@@ -242,7 +243,7 @@
   }
 
   .hero-commentary {
-    margin-top: 20px;
+    margin-top: 16px;
     max-width: 72%;
     min-height: 34px;
     font-family: "Cormorant Garamond", "Noto Serif SC", serif;
@@ -270,7 +271,7 @@
   .progress-wrap {
     position: relative;
     z-index: 2;
-    padding: 16px 28px;
+    padding: 12px 28px 14px;
     flex-shrink: 0;
   }
 
@@ -299,12 +300,12 @@
   }
 
   .controls {
-    height: 64px;
+    height: 68px;
     flex-shrink: 0;
     display: flex;
     align-items: center;
     justify-content: center;
-    gap: 28px;
+    gap: 32px;
     border-top: 1px solid var(--line);
     border-bottom: 1px solid var(--line);
   }
@@ -428,7 +429,7 @@
 
   /* 主页底部切换按钮 */
   .page1-footer {
-    height: 40px;
+    height: 36px;
     border-top: 1px solid var(--line);
     display: flex;
     align-items: center;
@@ -1995,7 +1996,7 @@
     canvasHintSeeds: {},
   }
 
-  const HERO_MAX_RATIO = 0.70
+  const HERO_MAX_RATIO = 1.0
 
   function rand(min, max) {
     return min + Math.random() * (max - min)
@@ -2079,7 +2080,7 @@
     const dpr = window.devicePixelRatio || 1
     visualState.width = rect.width
     visualState.height = rect.height
-    visualState.heroClipHeight = rect.height * 0.72
+    visualState.heroClipHeight = visualState.height
     visualState.dpr = dpr
     canvas.width = rect.width * dpr
     canvas.height = rect.height * dpr
