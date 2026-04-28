@@ -188,31 +188,77 @@ function formatWeather(data, fallbackLabel, cityLabel = null) {
 }
 
 async function fetchCityLabelByCoords(lat, lon, fallbackLabel) {
-  const key = process.env.WEATHER_API_KEY
-  if (!key || key === 'xxxxxxxx') return normalizeCityName(fallbackLabel, '当前位置')
-
   try {
-    const url = `https://api.openweathermap.org/geo/1.0/reverse?lat=${lat}&lon=${lon}&limit=1&appid=${key}`
-    const res = await fetch(url)
+    // 用 Nominatim（OpenStreetMap）反地理编码，精度到区县级，免费无需 Key
+    const url = `https://nominatim.openstreetmap.org/reverse?lat=${lat}&lon=${lon}&format=json&accept-language=zh,en&zoom=12`
+    const res = await fetch(url, {
+      headers: { 'User-Agent': 'Claudio/1.0 (personal music app)' }
+    })
     const data = await res.json()
-    const place = Array.isArray(data) ? data[0] : null
-    if (!place) return normalizeCityName(fallbackLabel, '当前位置')
+    const addr = data?.address
+    if (!addr) return normalizeCityName(fallbackLabel, '当前位置')
 
-    // For CN locations, state usually maps better to the city/municipality level
-    // than the district-like `name` field returned by the weather endpoint.
-    if (place.country === 'CN' && place.state) {
-      return normalizeCityName(place.local_names?.zh || place.state, fallbackLabel)
+    const country = addr.country_code?.toUpperCase()
+
+    // 中国：城市 + 区县
+    if (country === 'CN') {
+      const city = addr.city || addr.municipality || addr.state_district || addr.county || addr.state || ''
+      const district = addr.city_district || addr.district || addr.suburb || ''
+      if (city && district && !city.includes(district)) {
+        return `${city} ${district}`
+      }
+      return normalizeCityName(city || district || fallbackLabel, '当前位置')
     }
 
-    return normalizeCityName(
-      place.local_names?.zh ||
-      place.name ||
-      place.state ||
-      fallbackLabel,
-      '当前位置'
-    )
+    // 日本：都市 + 区
+    if (country === 'JP') {
+      const city = addr.city || addr.town || addr.county || ''
+      const ward = addr.city_district || addr.suburb || ''
+      if (city && ward && !city.includes(ward)) {
+        return `${city} ${ward}`
+      }
+      return normalizeCityName(city || fallbackLabel, '当前位置')
+    }
+
+    // 美国：城市, 州缩写
+    if (country === 'US') {
+      const city = addr.city || addr.town || addr.village || addr.county || ''
+      const stateAbbr = addr.ISO3166_2_lvl4?.replace('US-', '') || addr.state || ''
+      if (city && stateAbbr) return `${city}, ${stateAbbr}`
+      return normalizeCityName(city || fallbackLabel, '当前位置')
+    }
+
+    // 英国：城市 + 区
+    if (country === 'GB') {
+      const city = addr.city || addr.town || addr.county || ''
+      const district = addr.city_district || addr.suburb || ''
+      if (city && district && !city.includes(district)) return `${city} ${district}`
+      return normalizeCityName(city || fallbackLabel, '当前位置')
+    }
+
+    // 其他国家：城市（+ 区，如果有）
+    const city = addr.city || addr.town || addr.municipality || addr.county || addr.state || ''
+    const district = addr.city_district || addr.district || addr.suburb || ''
+    if (city && district && district !== city) return `${city} ${district}`
+    return normalizeCityName(city || fallbackLabel, '当前位置')
+
   } catch {
-    return normalizeCityName(fallbackLabel, '当前位置')
+    // Nominatim 失败时 fallback 到 OpenWeatherMap geo
+    try {
+      const key = process.env.WEATHER_API_KEY
+      if (!key || key === 'xxxxxxxx') return normalizeCityName(fallbackLabel, '当前位置')
+      const url = `https://api.openweathermap.org/geo/1.0/reverse?lat=${lat}&lon=${lon}&limit=1&appid=${key}`
+      const res = await fetch(url)
+      const geoData = await res.json()
+      const place = Array.isArray(geoData) ? geoData[0] : null
+      if (!place) return normalizeCityName(fallbackLabel, '当前位置')
+      return normalizeCityName(
+        place.local_names?.zh || place.name || place.state || fallbackLabel,
+        '当前位置'
+      )
+    } catch {
+      return normalizeCityName(fallbackLabel, '当前位置')
+    }
   }
 }
 
