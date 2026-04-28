@@ -1321,8 +1321,9 @@
 
   function renderThemePreview() {
     const buttons = themePreview.querySelectorAll('[data-theme-preview]')
+    const activeKey = forcedThemeKey || state.themeKey
     buttons.forEach((button) => {
-      button.classList.toggle('active', button.getAttribute('data-theme-preview') === forcedThemeKey)
+      button.classList.toggle('active', button.getAttribute('data-theme-preview') === activeKey)
     })
   }
 
@@ -1643,13 +1644,17 @@
   }
 
   const prefetchCache = new Map()
+  const PREFETCH_TTL_MS = 30 * 60 * 1000
 
   async function prefetchNextExplain() {
     if (localQueue.length === 0) return
     const next = localQueue[0]
     if (!next?.song_info) return
     const key = next.song_info.name + '::' + next.song_info.artist
-    if (prefetchCache.has(key)) return
+    const cached = prefetchCache.get(key)
+    // 缓存超过 30 分钟丢弃，避免时段变化后用旧文字
+    if (cached && Date.now() - cached.cachedAt < PREFETCH_TTL_MS) return
+    if (cached) prefetchCache.delete(key)
     try {
       const res = await fetch('/api/explain', {
         method: 'POST',
@@ -1666,6 +1671,7 @@
         prefetchCache.set(key, {
           explain_text: data.explain_text,
           say_audio: data.say_audio || null,
+          cachedAt: Date.now(),
         })
       }
     } catch {}
