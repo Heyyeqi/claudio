@@ -2495,8 +2495,17 @@
     const phaseProgress = getPhaseProgress(phaseKey, nowMs, state.sunriseTs, state.sunsetTs)
 
     if (phaseKey === 'sunrise') {
-      drawRadialGlow(width * 0.5, 0, width * 0.7, '#3A5A8A', (0.18 + Math.sin(nowMs / 14000 * Math.PI * 2) * 0.05) * alphaScale)
-      drawRadialGlow(width * 0.5, height, width * (0.4 + 0.25 * phaseProgress), '#C87840', (0.14 + phaseProgress * 0.12) * alphaScale)
+      // 天空顶部深蓝
+      drawRadialGlow(width * 0.5, 0, width * 0.9, '#3A5A8A', (0.22 + Math.sin(nowMs / 14000 * Math.PI * 2) * 0.05) * alphaScale)
+      // 地平线橙红光带
+      const horizonGrad = ctx.createLinearGradient(0, height * 0.55, 0, height * 0.85)
+      horizonGrad.addColorStop(0, 'rgba(200, 120, 64, 0)')
+      horizonGrad.addColorStop(0.4, `rgba(200, 120, 64, ${(0.28 * alphaScale).toFixed(4)})`)
+      horizonGrad.addColorStop(1, `rgba(180, 80, 30, ${(0.18 * alphaScale).toFixed(4)})`)
+      ctx.fillStyle = horizonGrad
+      ctx.fillRect(0, height * 0.55, width, height * 0.3)
+      // 底部暖光晕
+      drawRadialGlow(width * 0.5, height, width * (0.5 + 0.25 * phaseProgress), '#C87840', (0.20 + phaseProgress * 0.14) * alphaScale)
       return
     }
 
@@ -2605,6 +2614,18 @@
       bandGrad.addColorStop(1, 'rgba(40, 28, 12, 0)')
       ctx.fillStyle = bandGrad
       ctx.fillRect(0, height * 0.55, width, Math.max(0, bandBottom - height * 0.55))
+      // 深夜地平线微光（城市光污染感）
+      const cityGlow = ctx.createLinearGradient(0, height * 0.75, 0, height)
+      cityGlow.addColorStop(0, 'rgba(20, 12, 40, 0)')
+      cityGlow.addColorStop(1, `rgba(20, 12, 40, ${(0.22 * alphaScale).toFixed(4)})`)
+      ctx.fillStyle = cityGlow
+      ctx.fillRect(0, height * 0.75, width, height * 0.25)
+      // 顶部深蓝渐变增强天空感
+      const skyGrad = ctx.createLinearGradient(0, 0, 0, height * 0.4)
+      skyGrad.addColorStop(0, `rgba(8, 10, 28, ${(0.35 * alphaScale).toFixed(4)})`)
+      skyGrad.addColorStop(1, 'rgba(8, 10, 28, 0)')
+      ctx.fillStyle = skyGrad
+      ctx.fillRect(0, 0, width, height * 0.4)
     }
   }
 
@@ -2618,9 +2639,9 @@
     if (visibility <= 0.02) return
 
     const moonSuppression = astronomy.lunar?.isVisible
-      ? (astronomy.lunar.illumination || 0) * 0.6
+      ? (astronomy.lunar.illumination || 0) * 0.25
       : 0
-    const effectiveVisibility = Math.max(0, visibility - moonSuppression)
+    const effectiveVisibility = Math.max(0.15, visibility - moonSuppression)
     if (effectiveVisibility <= 0.02) return
 
     const sf = visualState.starField
@@ -2635,7 +2656,7 @@
         stars.forEach((star) => {
           if (star.y < 0 || star.y > maxY) star.y = rand(0, maxY * 0.98)
           const twinkle = 0.7 + 0.3 * Math.sin(nowMs / star.period * Math.PI * 2 + star.phase)
-          const alpha = star.baseAlpha * twinkle * effectiveVisibility * layerAlphaMultiplier * alphaScale
+          const alpha = star.baseAlpha * twinkle * effectiveVisibility * layerAlphaMultiplier * alphaScale * 1.8
           if (alpha < 0.01) return
 
         if (star.size > 1.6 && alpha > 0.3) {
