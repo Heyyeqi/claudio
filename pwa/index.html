@@ -773,6 +773,7 @@
   }
 
 </style>
+<script src="https://sdk.scdn.co/spotify-player.js"></script>
 </head>
 <body>
 <div id="app">
@@ -921,6 +922,131 @@
     const reason = event.reason && (event.reason.stack || event.reason.message) ? (event.reason.stack || event.reason.message) : String(event.reason)
     showError(`[promise] ${reason}`)
   })
+
+  // ── Spotify Web Playback SDK ────────────────────────────────────
+  let spotifyPlayer = null
+  let spotifyDeviceId = null
+  let spotifyToken = null
+  let spotifyReady = false
+  let spotifyCurrentUri = null
+  let spotifyProgressTimer = null
+
+  // SDK 就绪回调（Spotify SDK 会调用这个全局函数）
+  window.onSpotifyWebPlaybackSDKReady = () => {
+    console.log('[spotify] SDK ready')
+    initSpotifyPlayer()
+  }
+
+  async function fetchSpotifyStatus() {
+    try {
+      const res = await fetch('/api/spotify/status')
+      const data = await res.json()
+      if (data.connected && data.access_token) {
+        spotifyToken = data.access_token
+        return true
+      }
+      return false
+    } catch { return false }
+  }
+
+  async function initSpotifyPlayer() {
+    const ok = await fetchSpotifyStatus()
+    if (!ok) {
+      console.log('[spotify] 未授权，使用 NCM 播放')
+      return
+    }
+    spotifyPlayer = new Spotify.Player({
+      name: 'RodiO',
+      getOAuthToken: async cb => {
+        const res = await fetch('/api/spotify/status')
+        const data = await res.json()
+        cb(data.access_token || spotifyToken)
+      },
+      volume: 0.75,
+    })
+
+    spotifyPlayer.addListener('ready', ({ device_id }) => {
+      spotifyDeviceId = device_id
+      spotifyReady = true
+      console.log('[spotify] Player ready, device:', device_id)
+    })
+
+    spotifyPlayer.addListener('not_ready', ({ device_id }) => {
+      spotifyReady = false
+      console.log('[spotify] Player not ready:', device_id)
+    })
+
+    spotifyPlayer.addListener('player_state_changed', (s) => {
+      if (!s) return
+      state.playing = !s.paused
+      state.progress = s.position / 1000
+      state.duration = s.duration / 1000
+      renderControls()
+      renderProgress()
+      // 歌曲自然结束
+      if (s.paused && s.position === 0 && s.restrictions?.disallow_resuming_reasons?.includes('not_paused')) {
+        advanceToNext()
+      }
+    })
+
+    spotifyPlayer.addListener('playback_error', ({ message }) => {
+      console.error('[spotify] playback error:', message)
+      advanceToNext()
+    })
+
+    await spotifyPlayer.connect()
+  }
+
+  async function spotifyPlay(uri) {
+    if (!spotifyReady || !spotifyDeviceId || !spotifyToken) return false
+    try {
+      const res = await fetch(`https://api.spotify.com/v1/me/player/play?device_id=${spotifyDeviceId}`, {
+        method: 'PUT',
+        headers: {
+          Authorization: `Bearer ${spotifyToken}`,
+          'Content-Type': 'application/json',
+        },
+        body: JSON.stringify({ uris: [uri] }),
+      })
+      if (res.status === 401) {
+        // token 过期，刷新后重试
+        const status = await fetch('/api/spotify/status')
+        const data = await status.json()
+        if (data.access_token) {
+          spotifyToken = data.access_token
+          return spotifyPlay(uri)
+        }
+        return false
+      }
+      if (!res.ok) return false
+      spotifyCurrentUri = uri
+      // 启动进度轮询
+      clearInterval(spotifyProgressTimer)
+      spotifyProgressTimer = setInterval(async () => {
+        if (!state.playing) return
+        const s = await spotifyPlayer.getCurrentState()
+        if (!s) return
+        state.progress = s.position / 1000
+        state.duration = s.duration / 1000
+        renderProgress()
+      }, 1000)
+      return true
+    } catch (e) {
+      console.error('[spotify] play failed:', e)
+      return false
+    }
+  }
+
+  async function spotifyToggle() {
+    if (!spotifyPlayer) return false
+    await spotifyPlayer.togglePlay()
+    return true
+  }
+
+  async function spotifySeek(seconds) {
+    if (!spotifyPlayer) return
+    await spotifyPlayer.seek(seconds * 1000)
+  }
 
   const audio = document.getElementById('claudio-audio')
   const app = document.getElementById('app')
@@ -1525,23 +1651,15 @@
   function playSong(item, options = {}) {
     const recordHistory = options.recordHistory !== false
     const autoExplain = options.autoExplain !== false
-    if (!item || !item.play_url) return
+    if (!item) return
+    if (!item.play_url && !item.spotify_uri) return
     activeExplainToken += 1
     stopVoicePlayback()
-    if (recordHistory && state.currentTrack && state.currentTrack.name && audio.src) {
-      playedHistory.push({ song_info: state.currentTrack, play_url: audio.src })
+    if (recordHistory && state.currentTrack && state.currentTrack.name) {
+      playedHistory.push({ song_info: state.currentTrack, play_url: audio.src, spotify_uri: item.spotify_uri })
       if (playedHistory.length > 30) playedHistory = playedHistory.slice(-30)
     }
-    // 确保音频格式支持
-    if (!item.play_url) return
-    try {
-      audio.pause()
-      audio.src = ''
-      audio.load()
-    } catch (e) {}
-    audio.src = item.play_url
-    audio.load()
-    // 先预更新歌名，播放失败时回滚
+
     const prevTrack = state.currentTrack
     state.currentTrack = item.song_info || null
     state.progress = 0
@@ -1549,20 +1667,60 @@
     renderHero()
     renderQueue()
     renderProgress()
-    audio.play().then(() => {
-      state.playing = true
-      renderControls()
-      if (autoExplain) {
-        maybeAutoExplain(item)
-      }
-      setTimeout(prefetchNextExplain, 2000)
-    }).catch((e) => {
-      state.playing = false
-      // 播放失败：回滚歌名，静默跳下一首
+
+    // Spotify 播放路径
+    if (item.spotify_uri && spotifyReady) {
+      spotifyPlay(item.spotify_uri).then(ok => {
+        if (ok) {
+          state.playing = true
+          renderControls()
+          if (autoExplain) maybeAutoExplain(item)
+          setTimeout(prefetchNextExplain, 2000)
+        } else {
+          // Spotify 失败，尝试 NCM fallback
+          if (item.play_url) {
+            playViaNcm(item, prevTrack, autoExplain)
+          } else {
+            state.currentTrack = prevTrack
+            renderHero()
+            renderControls()
+            setTimeout(() => advanceToNext(), 800)
+          }
+        }
+      })
+      return
+    }
+
+    // NCM 播放路径
+    playViaNcm(item, prevTrack, autoExplain)
+  }
+
+  function playViaNcm(item, prevTrack, autoExplain) {
+    if (!item.play_url) {
       state.currentTrack = prevTrack
       renderHero()
       renderControls()
-      console.error('[claudio] 播放失败:', e.name, e.message)
+      setTimeout(() => advanceToNext(), 800)
+      return
+    }
+    try {
+      audio.pause()
+      audio.src = ''
+      audio.load()
+    } catch (e) {}
+    audio.src = item.play_url
+    audio.load()
+    audio.play().then(() => {
+      state.playing = true
+      renderControls()
+      if (autoExplain) maybeAutoExplain(item)
+      setTimeout(prefetchNextExplain, 2000)
+    }).catch((e) => {
+      state.playing = false
+      state.currentTrack = prevTrack
+      renderHero()
+      renderControls()
+      console.error('[claudio] NCM 播放失败:', e.name, e.message)
       setTimeout(() => advanceToNext(), 800)
     })
   }
@@ -1972,6 +2130,12 @@
     if (commentaryAudio && !audio.src && localQueue.length > 0) {
       stopVoicePlayback()
     }
+    // Spotify 模式
+    if (spotifyCurrentUri && spotifyReady) {
+      spotifyToggle()
+      return
+    }
+    // NCM 模式
     if (!audio.src) {
       advanceToNext()
       return
@@ -1983,7 +2147,12 @@
   function seekTo(event) {
     if (!state.duration) return
     const rect = event.currentTarget.getBoundingClientRect()
-    audio.currentTime = ((event.clientX - rect.left) / rect.width) * state.duration
+    const seconds = ((event.clientX - rect.left) / rect.width) * state.duration
+    if (spotifyCurrentUri && spotifyReady) {
+      spotifySeek(seconds)
+    } else {
+      audio.currentTime = seconds
+    }
   }
 
   function pickQueue(index) {
@@ -3789,6 +3958,10 @@
   connectWs()
   refreshAmbientNow(true).catch(() => {})
   weatherFrameId = requestAnimationFrame(startVisualLoop)
+
+  // Spotify：如果 SDK 已经加载完毕（onSpotifyWebPlaybackSDKReady 已触发），手动初始化
+  // 如果 SDK 还没好，onSpotifyWebPlaybackSDKReady 会在就绪时自动调用 initSpotifyPlayer
+  if (window.Spotify) initSpotifyPlayer()
 })()
 </script>
 </body>
