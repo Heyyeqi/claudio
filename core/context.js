@@ -135,6 +135,15 @@ function normalizeCityName(name, fallbackLabel) {
   return value
 }
 
+function makeLocationParts(cityLine, areaLine, fallbackLabel = '当前位置') {
+  const city = normalizeCityName(cityLine, fallbackLabel)
+  const area = normalizeCityName(areaLine, '')
+  return {
+    cityLine: city,
+    areaLine: area && area !== city ? area : '',
+  }
+}
+
 function makeWeatherState({
   main = 'Clear',
   description = '未知',
@@ -146,21 +155,26 @@ function makeWeatherState({
   sunriseTs = null,
   sunsetTs = null,
   cloudiness = null,
+  cityLine = '',
+  areaLine = '',
 }) {
   const displayCity = normalizeCityName(city || locationName, '当前位置')
   const displayLocation = normalizeCityName(locationName || city, displayCity)
+  const locationParts = makeLocationParts(cityLine || displayCity, areaLine || displayLocation, displayCity)
   return {
     main,
     description,
     temp,
     city: displayCity,
     locationName: displayLocation,
+    cityLine: locationParts.cityLine,
+    areaLine: locationParts.areaLine,
     sunrise,
     sunset,
     sunriseTs,
     sunsetTs,
     cloudiness,
-    text: `${displayCity}，${description}，${temp}°C`,
+    text: `${locationParts.cityLine}${locationParts.areaLine ? ' ' + locationParts.areaLine : ''}，${description}，${temp}°C`,
   }
 }
 
@@ -184,17 +198,22 @@ function formatWeather(data, fallbackLabel, cityLabel = null) {
   const sunsetTs = data?.sys?.sunset || null
   const sunrise = formatClock(data?.sys?.sunrise)
   const sunset = formatClock(data?.sys?.sunset)
+  const parts = typeof cityLabel === 'object' && cityLabel
+    ? cityLabel
+    : makeLocationParts(cityLabel || locationName, '', locationName)
   return makeWeatherState({
     main,
     description: desc,
     temp,
-    city: cityLabel || locationName,
+    city: parts.cityLine || locationName,
     locationName,
     sunrise,
     sunset,
     sunriseTs,
     sunsetTs,
     cloudiness: typeof data?.clouds?.all === 'number' ? data.clouds.all : null,
+    cityLine: parts.cityLine,
+    areaLine: parts.areaLine,
   })
 }
 
@@ -207,7 +226,7 @@ async function fetchCityLabelByCoords(lat, lon, fallbackLabel) {
     })
     const data = await res.json()
     const addr = data?.address
-    if (!addr) return normalizeCityName(fallbackLabel, '当前位置')
+    if (!addr) return makeLocationParts(fallbackLabel, '', '当前位置')
 
     const country = addr.country_code?.toUpperCase()
 
@@ -215,60 +234,52 @@ async function fetchCityLabelByCoords(lat, lon, fallbackLabel) {
     if (country === 'CN') {
       const city = addr.city || addr.municipality || addr.state_district || addr.county || addr.state || ''
       const district = addr.city_district || addr.district || addr.suburb || ''
-      if (city && district && !city.includes(district)) {
-        return `${city} ${district}`
-      }
-      return normalizeCityName(city || district || fallbackLabel, '当前位置')
+      return makeLocationParts(city || district || fallbackLabel, district, '当前位置')
     }
 
     // 日本：都市 + 区
     if (country === 'JP') {
       const city = addr.city || addr.town || addr.county || ''
       const ward = addr.city_district || addr.suburb || ''
-      if (city && ward && !city.includes(ward)) {
-        return `${city} ${ward}`
-      }
-      return normalizeCityName(city || fallbackLabel, '当前位置')
+      return makeLocationParts(city || ward || fallbackLabel, ward, '当前位置')
     }
 
     // 美国：城市, 州缩写
     if (country === 'US') {
       const city = addr.city || addr.town || addr.village || addr.county || ''
       const stateAbbr = addr.ISO3166_2_lvl4?.replace('US-', '') || addr.state || ''
-      if (city && stateAbbr) return `${city}, ${stateAbbr}`
-      return normalizeCityName(city || fallbackLabel, '当前位置')
+      return makeLocationParts(city || stateAbbr || fallbackLabel, stateAbbr, '当前位置')
     }
 
     // 英国：城市 + 区
     if (country === 'GB') {
       const city = addr.city || addr.town || addr.county || ''
       const district = addr.city_district || addr.suburb || ''
-      if (city && district && !city.includes(district)) return `${city} ${district}`
-      return normalizeCityName(city || fallbackLabel, '当前位置')
+      return makeLocationParts(city || district || fallbackLabel, district, '当前位置')
     }
 
     // 其他国家：城市（+ 区，如果有）
     const city = addr.city || addr.town || addr.municipality || addr.county || addr.state || ''
     const district = addr.city_district || addr.district || addr.suburb || ''
-    if (city && district && district !== city) return `${city} ${district}`
-    return normalizeCityName(city || fallbackLabel, '当前位置')
+    return makeLocationParts(city || district || fallbackLabel, district, '当前位置')
 
   } catch {
     // Nominatim 失败时 fallback 到 OpenWeatherMap geo
     try {
       const key = process.env.WEATHER_API_KEY
-      if (!key || key === 'xxxxxxxx') return normalizeCityName(fallbackLabel, '当前位置')
+      if (!key || key === 'xxxxxxxx') return makeLocationParts(fallbackLabel, '', '当前位置')
       const url = `https://api.openweathermap.org/geo/1.0/reverse?lat=${lat}&lon=${lon}&limit=1&appid=${key}`
       const res = await fetchJsonWithTimeout(url)
       const geoData = await res.json()
       const place = Array.isArray(geoData) ? geoData[0] : null
-      if (!place) return normalizeCityName(fallbackLabel, '当前位置')
-      return normalizeCityName(
+      if (!place) return makeLocationParts(fallbackLabel, '', '当前位置')
+      return makeLocationParts(
         place.local_names?.zh || place.name || place.state || fallbackLabel,
+        place.state || '',
         '当前位置'
       )
     } catch {
-      return normalizeCityName(fallbackLabel, '当前位置')
+      return makeLocationParts(fallbackLabel, '', '当前位置')
     }
   }
 }
@@ -281,6 +292,8 @@ async function fetchWeatherByCoords(lat, lon) {
       temp: '?',
       city: '当前位置',
       locationName: '当前位置',
+      cityLine: '当前位置',
+      areaLine: '',
     })
     return currentWeather
   }
@@ -300,6 +313,8 @@ async function fetchWeatherByCoords(lat, lon) {
       temp: '?',
       city: '当前位置',
       locationName: '当前位置',
+      cityLine: '当前位置',
+      areaLine: '',
     })
     return currentWeather
   }
@@ -314,6 +329,8 @@ async function fetchWeatherByCity() {
       temp: '?',
       city,
       locationName: city,
+      cityLine: city,
+      areaLine: '',
     })
     return currentWeather
   }
@@ -330,6 +347,8 @@ async function fetchWeatherByCity() {
       temp: '?',
       city,
       locationName: city,
+      cityLine: city,
+      areaLine: '',
     })
     return currentWeather
   }
