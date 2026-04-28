@@ -931,6 +931,21 @@
   let spotifyCurrentUri = null
   let spotifyProgressTimer = null
 
+  function syncCurrentTrackFromSpotifyState(s) {
+    const track = s && s.track_window && s.track_window.current_track
+    if (!track) return
+    const nextTrack = {
+      id: track.id || track.uri || null,
+      name: track.name || null,
+      artist: Array.isArray(track.artists) ? track.artists.map(a => a.name).filter(Boolean).join('; ') : null,
+    }
+    if (!nextTrack.name) return
+    spotifyCurrentUri = track.uri || spotifyCurrentUri
+    state.currentTrack = nextTrack
+    renderHero()
+    renderQueue()
+  }
+
   // SDK 就绪回调（Spotify SDK 会调用这个全局函数）
   window.onSpotifyWebPlaybackSDKReady = () => {
     console.log('[spotify] SDK ready')
@@ -978,6 +993,7 @@
 
     spotifyPlayer.addListener('player_state_changed', (s) => {
       if (!s) return
+      syncCurrentTrackFromSpotifyState(s)
       state.playing = !s.paused
       state.progress = s.position / 1000
       state.duration = s.duration / 1000

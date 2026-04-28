@@ -580,12 +580,20 @@ async function resolveQueue(songs) {
     songs.map(async (song, index) => {
       try {
         if (useSpotify) {
-          const uri = await spotify.searchTrack(song.name, song.artist)
-          if (uri) {
-            console.log(`[spotify] 命中 "${song.name} / ${song.artist}" -> ${uri}`)
+          const match = await spotify.searchTrack(song.name, song.artist)
+          if (match?.uri) {
+            const actualArtists = Array.isArray(match.artists) ? match.artists.filter(Boolean).join('; ') : song.artist
+            console.log(`[spotify] 命中 "${song.name} / ${song.artist}" -> ${match.uri}`)
             spotifyQueue[index] = {
-              song_info: { ...song },
-              spotify_uri: uri,
+              song_info: {
+                ...song,
+                id: match.id || song.id || null,
+                name: match.name || song.name,
+                artist: actualArtists || song.artist,
+              },
+              requested_song_info: { ...song },
+              spotify_uri: match.uri,
+              spotify_track: match,
               play_url: null,
               source: 'spotify',
             }

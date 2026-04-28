@@ -207,7 +207,15 @@ async function searchTrack(name, artist) {
     .filter(Boolean)
     .sort((a, b) => b.score - a.score)
 
-  return scored[0]?.track?.uri || null  // spotify:track:xxx
+  const track = scored[0]?.track || null
+  if (!track) return null
+  return {
+    uri: track.uri || null,
+    id: track.id || null,
+    name: track.name || name,
+    artists: (track.artists || []).map(a => a.name).filter(Boolean),
+    album: track.album?.name || null,
+  }
 }
 
 // ── 批量搜索，返回 { name, artist, uri } 列表 ───────────────────
@@ -215,9 +223,18 @@ async function resolveSpotifyUris(songs) {
   const results = await Promise.all(
     songs.map(async song => {
       try {
-        const uri = await searchTrack(song.name, song.artist)
-        if (!uri) return null
-        return { song_info: song, spotify_uri: uri }
+        const match = await searchTrack(song.name, song.artist)
+        if (!match?.uri) return null
+        return {
+          song_info: {
+            ...song,
+            id: match.id || song.id || null,
+            name: match.name || song.name,
+            artist: match.artists?.length ? match.artists.join('; ') : song.artist,
+          },
+          spotify_uri: match.uri,
+          spotify_track: match,
+        }
       } catch (e) {
         console.error(`[spotify] 搜索失败 "${song.name}":`, e.message)
         return null
