@@ -353,6 +353,7 @@ function extractEmotionFromInput(userText) {
 const COOKIE_PATH = path.join(__dirname, 'user/ncm-cookie.json')
 
 function getNcmCookie() {
+  if (process.env.NCM_COOKIE) return process.env.NCM_COOKIE
   try {
     return JSON.parse(fs.readFileSync(COOKIE_PATH, 'utf8')).raw || ''
   } catch { return '' }
