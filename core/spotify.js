@@ -4,6 +4,10 @@ const CLIENT_ID = process.env.SPOTIFY_CLIENT_ID
 const CLIENT_SECRET = process.env.SPOTIFY_CLIENT_SECRET
 const REDIRECT_URI = process.env.SPOTIFY_REDIRECT_URI || 'https://web-production-a5193.up.railway.app/callback'
 const SPOTIFY_TOKEN_PREF = 'spotify_user_token_v1'
+const SPOTIFY_BAD_TITLE_KWS = [
+  'live', 'remix', 'acoustic', 'instrumental', 'cover', 'tribute',
+  'karaoke', 'piano', 'version', 'ver.', 'edit', 'mono', 'demo',
+]
 
 let clientCredToken = null      // 用于搜索（不需要用户授权）
 let userAccessToken = null      // 用于播放（需要用户授权）
@@ -45,6 +49,24 @@ function persistUserToken() {
 }
 
 loadPersistedUserToken()
+
+function normalizeSpotifyText(text) {
+  return String(text || '')
+    .normalize('NFKD')
+    .replace(/[\u0300-\u036f]/g, '')
+    .toLowerCase()
+    .replace(/[’'".,!?()[\]{}]/g, ' ')
+    .replace(/\s+/g, ' ')
+    .trim()
+}
+
+function normalizeSpotifyTitle(text) {
+  return normalizeSpotifyText(text)
+    .replace(/\b(feat|ft|with|and)\b.*$/g, '')
+    .replace(/\b(live|remix|acoustic|instrumental|cover|tribute|karaoke|piano|version|ver\.|edit|mono|demo)\b/g, ' ')
+    .replace(/\s+/g, ' ')
+    .trim()
+}
 
 // ── Client Credentials Token（搜索用）───────────────────────────
 async function getClientCredToken() {
@@ -160,12 +182,32 @@ async function searchTrack(name, artist) {
   const data = await res.json()
   const tracks = data?.tracks?.items || []
   if (!tracks.length) return null
-  // 优先完整匹配歌手名
-  const artistLower = artist.toLowerCase()
-  const match = tracks.find(t =>
-    t.artists.some(a => a.name.toLowerCase().includes(artistLower) || artistLower.includes(a.name.toLowerCase()))
-  )
-  return (match || tracks[0])?.uri || null  // spotify:track:xxx
+  const expectedArtist = normalizeSpotifyText(artist)
+  const expectedTitle = normalizeSpotifyTitle(name)
+  const allowedTitles = expectedTitle ? [expectedTitle] : []
+
+  const scored = tracks
+    .map(track => {
+      const title = normalizeSpotifyTitle(track.name)
+      const artists = (track.artists || []).map(a => normalizeSpotifyText(a.name)).filter(Boolean)
+      const hasBadTitle = SPOTIFY_BAD_TITLE_KWS.some(kw => normalizeSpotifyText(track.name).includes(kw))
+      if (!title || hasBadTitle) return null
+
+      const exactTitle = title === expectedTitle
+      const titleMatch = exactTitle || (expectedTitle && (title.includes(expectedTitle) || expectedTitle.includes(title)))
+      if (!titleMatch && allowedTitles.length) return null
+
+      const artistExact = artists.includes(expectedArtist)
+      const artistMatch = artistExact || artists.some(a => a.includes(expectedArtist) || expectedArtist.includes(a))
+      if (!artistMatch) return null
+
+      const score = (exactTitle ? 3 : 0) + (artistExact ? 2 : 0)
+      return { track, score }
+    })
+    .filter(Boolean)
+    .sort((a, b) => b.score - a.score)
+
+  return scored[0]?.track?.uri || null  // spotify:track:xxx
 }
 
 // ── 批量搜索，返回 { name, artist, uri } 列表 ───────────────────

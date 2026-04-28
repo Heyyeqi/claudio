@@ -1677,17 +1677,22 @@
           if (autoExplain) maybeAutoExplain(item)
           setTimeout(prefetchNextExplain, 2000)
         } else {
-          // Spotify 失败，尝试 NCM fallback
-          if (item.play_url) {
-            playViaNcm(item, prevTrack, autoExplain)
-          } else {
-            state.currentTrack = prevTrack
-            renderHero()
-            renderControls()
-            setTimeout(() => advanceToNext(), 800)
-          }
+          state.currentTrack = prevTrack
+          renderHero()
+          renderControls()
+          appendDj('Spotify 没播成，跳过这首。')
+          setTimeout(() => advanceToNext(), 800)
         }
       })
+      return
+    }
+
+    if (item.spotify_uri) {
+      state.currentTrack = prevTrack
+      renderHero()
+      renderControls()
+      appendDj('Spotify 还没准备好，先跳过这首。')
+      setTimeout(() => advanceToNext(), 800)
       return
     }
 

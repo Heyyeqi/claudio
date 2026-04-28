@@ -575,7 +575,6 @@ async function ncmGetUrl(songId, name, artist) {
 async function resolveQueue(songs) {
   const useSpotify = spotify.hasUserToken()
   const spotifyQueue = []
-  const ncmFallbackSongs = []
 
   await Promise.all(
     songs.map(async (song, index) => {
@@ -592,31 +591,17 @@ async function resolveQueue(songs) {
             }
             return
           }
-          console.log(`[spotify] 未找到 "${song.name}"，fallback NCM`)
+          return
         }
-        ncmFallbackSongs.push({ song, index })
+        const { url, id: realId } = await ncmGetUrl(song.id, song.name, song.artist)
+        if (!url) return
+        spotifyQueue[index] = { song_info: { ...song, id: realId || song.id }, play_url: url, source: 'ncm' }
       } catch (e) {
         console.error(`[queue] 解析 "${song.name}" 失败:`, e.message)
       }
     })
   )
-
-  const ncmResults = await Promise.all(
-    ncmFallbackSongs
-      .sort((a, b) => a.index - b.index)
-      .map(async ({ song }) => {
-        try {
-          const { url, id: realId } = await ncmGetUrl(song.id, song.name, song.artist)
-          if (!url) return null
-          return { song_info: { ...song, id: realId || song.id }, play_url: url, source: 'ncm' }
-        } catch (e) {
-          console.error(`[queue] 解析 "${song.name}" 失败:`, e.message)
-          return null
-        }
-      })
-  )
-
-  return [...spotifyQueue.filter(Boolean), ...ncmResults.filter(Boolean)]
+  return spotifyQueue.filter(Boolean)
 }
 
 async function buildDjResponse(input, options = {}) {
@@ -640,13 +625,17 @@ async function buildDjResponse(input, options = {}) {
   let queue = []
   const recentPlays = state.getRecentPlays(120)
   const recentRecommended = getRecentRecommendedKeySet()
+  const useSpotify = spotify.hasUserToken()
 
   if (result.play && result.play.length > 0) {
     queue = await resolveQueue(result.play)
     queue = filterQueueCandidates(queue, currentQueue, recentPlays, recentRecommended)
 
-    for (let attempt = 0; queue.length < MIN_BATCH_SIZE && attempt < 3; attempt++) {
-      const refillPrompt = `继续补足队列，还需要 ${MIN_BATCH_SIZE - queue.length} 首，避开近期已播、当前队列里已有的歌，以及最近已经推荐过的歌`
+    const refillAttempts = useSpotify ? 5 : 3
+    for (let attempt = 0; queue.length < MIN_BATCH_SIZE && attempt < refillAttempts; attempt++) {
+      const refillPrompt = useSpotify
+        ? `继续补足队列，还需要 ${MIN_BATCH_SIZE - queue.length} 首。只要 Spotify 可直接播放、歌名和艺人都严格匹配的歌，避开近期已播、当前队列里已有的歌，以及最近已经推荐过的歌。`
+        : `继续补足队列，还需要 ${MIN_BATCH_SIZE - queue.length} 首，避开近期已播、当前队列里已有的歌，以及最近已经推荐过的歌`
       const refillCtx = await context.buildContext(refillPrompt, {
         currentQueue: [...(currentQueue || []), ...queue],
       })
