@@ -2610,7 +2610,11 @@
 
   function drawStarField(nowMs, astronomy, alphaScale) {
     if (!astronomy) return
-    const visibility = astronomy.stars?.visibility ?? 0
+    const now = new Date()
+    const hour = now.getHours()
+    const isNightHour = hour >= 21 || hour < 6
+    const forcedVisibility = isNightHour ? 0.75 : 0
+    const visibility = Math.max(astronomy.stars?.visibility ?? 0, forcedVisibility)
     if (visibility <= 0.02) return
 
     const moonSuppression = astronomy.lunar?.isVisible
@@ -2752,7 +2756,7 @@
     const sunAltitudeRatio = clamp(altitude / 90, 0, 1)
     const y = height * (0.68 - 0.58 * sunAltitudeRatio)
     const horizonProximity = 1 - Math.min(1, altitude / 20)
-    const baseAlpha = (0.18 + horizonProximity * 0.14) * alphaScale
+    const baseAlpha = (0.52 + horizonProximity * 0.32) * alphaScale
     const sunColor = {
       r: 255,
       g: Math.round(140 + (1 - horizonProximity) * 100),
@@ -2775,7 +2779,7 @@
 
     const innerRadius = width * 0.06
     const innerGrad = ctx.createRadialGradient(x, y, 0, x, y, innerRadius)
-    innerGrad.addColorStop(0, `rgba(255,255,${Math.round(200 + (1 - horizonProximity) * 55)},${(baseAlpha * 1.2).toFixed(4)})`)
+    innerGrad.addColorStop(0, `rgba(255,255,${Math.round(200 + (1 - horizonProximity) * 55)},${Math.min(0.95, baseAlpha * 1.8).toFixed(4)})`)
     innerGrad.addColorStop(1, 'rgba(255,255,200,0)')
     ctx.fillStyle = innerGrad
     ctx.fillRect(0, 0, width, height)
@@ -2797,10 +2801,11 @@
     const lunar = astronomy.lunar || {}
     const effectivePhase = forcedThemeKey ? phaseKey : (astronomy.solar?.phase || phaseKey)
     // Only show moon at night, or sunset if altitude is high
+    const lunarAlt = lunar.altitude ?? 35
     const shouldDrawMoon = effectivePhase === 'night'
-      ? Boolean(lunar.isVisible && (lunar.altitude || 0) > 0)
+      ? (lunar.illumination > 0.05 && lunarAlt > -10)
       : effectivePhase === 'sunset'
-        ? (lunar.altitude || 0) > 25
+        ? lunarAlt > 15
         : false
     if (!shouldDrawMoon) return
 
@@ -2818,7 +2823,7 @@
 
     // Glow — soft, large, very low alpha
     const glowRadius = moonRadius * 4.5
-    const glowAlpha = illumination * 0.08 * alphaScale
+    const glowAlpha = illumination * 0.22 * alphaScale
     const glowGrad = ctx.createRadialGradient(moonX, moonY, 0, moonX, moonY, glowRadius)
     glowGrad.addColorStop(0, `rgba(220,220,200,${glowAlpha.toFixed(4)})`)
     glowGrad.addColorStop(0.4, `rgba(220,220,200,${(glowAlpha * 0.4).toFixed(4)})`)
