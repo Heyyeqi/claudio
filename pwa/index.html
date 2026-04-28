@@ -1850,7 +1850,7 @@
   async function fetchServerNext() {
     const response = await fetch('/api/next')
     const data = await response.json()
-    if (data && data.play_url) {
+    if (data && (data.play_url || data.spotify_uri)) {
       playSong(data)
       return true
     }

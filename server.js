@@ -262,6 +262,14 @@ async function checkWeatherChange() {
   }
 }
 
+let buildDjResponseChain = Promise.resolve()
+
+function runSerializedBuildDjResponse(task) {
+  const next = buildDjResponseChain.then(task, task)
+  buildDjResponseChain = next.then(() => undefined, () => undefined)
+  return next
+}
+
 function makeSongPayload(song) {
   return {
     id: song?.id || null,
@@ -626,101 +634,103 @@ async function resolveQueue(songs) {
 }
 
 async function buildDjResponse(input, options = {}) {
-  const {
-    persistMessages = true,
-    broadcast = false,
-    currentQueue = playQueue,
-    appendQueue = false,
-    includeSpeech = true,
-    emotionSignal = null,
-  } = options
+  return runSerializedBuildDjResponse(async () => {
+    const {
+      persistMessages = true,
+      broadcast = false,
+      currentQueue = playQueue,
+      appendQueue = false,
+      includeSpeech = true,
+      emotionSignal = null,
+    } = options
 
-  const intent = router.route(input)
-  if (intent === 'system') {
-    return { say: null, say_audio: null, queue: [], reason: '', segue: '', intent }
-  }
-
-  const ctx = await context.buildContext(input, { currentQueue, emotionSignal })
-  const result = await claude.askClaude(ctx)
-
-  let queue = []
-  const recentPlays = state.getRecentPlays(120)
-  const recentRecommended = getRecentRecommendedKeySet()
-  const useSpotify = spotify.hasUserToken()
-
-  if (result.play && result.play.length > 0) {
-    queue = await resolveQueue(result.play)
-    queue = filterQueueCandidates(queue, currentQueue, recentPlays, recentRecommended)
-
-    const refillAttempts = useSpotify ? 5 : 3
-    for (let attempt = 0; queue.length < MIN_BATCH_SIZE && attempt < refillAttempts; attempt++) {
-      const refillPrompt = useSpotify
-        ? `继续补足队列，还需要 ${MIN_BATCH_SIZE - queue.length} 首。只要 Spotify 可直接播放、歌名和艺人都严格匹配的歌，避开近期已播、当前队列里已有的歌，以及最近已经推荐过的歌。`
-        : `继续补足队列，还需要 ${MIN_BATCH_SIZE - queue.length} 首，避开近期已播、当前队列里已有的歌，以及最近已经推荐过的歌`
-      const refillCtx = await context.buildContext(refillPrompt, {
-        currentQueue: [...(currentQueue || []), ...queue],
-      })
-      const refillResult = await claude.askClaude(refillCtx)
-      const refillQueue = await resolveQueue(refillResult.play || [])
-      const mergedQueue = [...queue, ...refillQueue]
-      queue = filterQueueCandidates(mergedQueue, currentQueue, recentPlays, recentRecommended)
+    const intent = router.route(input)
+    if (intent === 'system') {
+      return { say: null, say_audio: null, queue: [], reason: '', segue: '', intent }
     }
 
-    queue = queue.slice(0, MAX_BATCH_SIZE)
-    queue = markBatchEdges(queue)
+    const ctx = await context.buildContext(input, { currentQueue, emotionSignal })
+    const result = await claude.askClaude(ctx)
 
-    scheduler.incrementCount()
-  }
+    let queue = []
+    const recentPlays = state.getRecentPlays(120)
+    const recentRecommended = getRecentRecommendedKeySet()
+    const useSpotify = spotify.hasUserToken()
 
-  playQueue = appendQueue
-    ? dedupeQueueItems([...(currentQueue || []), ...queue])
-    : [...queue]
+    if (result.play && result.play.length > 0) {
+      queue = await resolveQueue(result.play)
+      queue = filterQueueCandidates(queue, currentQueue, recentPlays, recentRecommended)
 
-  if (queue.length > 0) {
-    rememberRecentRecommendedQueue(queue)
-  }
+      const refillAttempts = useSpotify ? 5 : 3
+      for (let attempt = 0; queue.length < MIN_BATCH_SIZE && attempt < refillAttempts; attempt++) {
+        const refillPrompt = useSpotify
+          ? `继续补足队列，还需要 ${MIN_BATCH_SIZE - queue.length} 首。只要 Spotify 可直接播放、歌名和艺人都严格匹配的歌，避开近期已播、当前队列里已有的歌，以及最近已经推荐过的歌。`
+          : `继续补足队列，还需要 ${MIN_BATCH_SIZE - queue.length} 首，避开近期已播、当前队列里已有的歌，以及最近已经推荐过的歌`
+        const refillCtx = await context.buildContext(refillPrompt, {
+          currentQueue: [...(currentQueue || []), ...queue],
+        })
+        const refillResult = await claude.askClaude(refillCtx)
+        const refillQueue = await resolveQueue(refillResult.play || [])
+        const mergedQueue = [...queue, ...refillQueue]
+        queue = filterQueueCandidates(mergedQueue, currentQueue, recentPlays, recentRecommended)
+      }
 
-  const say_audio = includeSpeech && result.say
-    ? await tts.synthesize(result.say).catch(e => {
-        console.error('[tts]', e.message)
-        return null
-      })
-    : null
+      queue = queue.slice(0, MAX_BATCH_SIZE)
+      queue = markBatchEdges(queue)
 
-  if (persistMessages) {
-    state.addMessage('user', input)
-    state.addMessage('assistant', JSON.stringify(result))
-  }
+      scheduler.incrementCount()
+    }
 
-  if (broadcast) {
-    latestStationPayload = {
-      type: 'playlist-ready',
-      say: result.say,
+    playQueue = appendQueue
+      ? dedupeQueueItems([...(currentQueue || []), ...queue])
+      : [...queue]
+
+    if (queue.length > 0) {
+      rememberRecentRecommendedQueue(queue)
+    }
+
+    const say_audio = includeSpeech && result.say
+      ? await tts.synthesize(result.say).catch(e => {
+          console.error('[tts]', e.message)
+          return null
+        })
+      : null
+
+    if (persistMessages) {
+      state.addMessage('user', input)
+      state.addMessage('assistant', JSON.stringify(result))
+    }
+
+    if (broadcast) {
+      latestStationPayload = {
+        type: 'playlist-ready',
+        say: result.say,
+        say_audio,
+        queue,
+        reason: result.reason,
+        segue: result.segue,
+      }
+
+      scheduler.broadcast(latestStationPayload)
+
+      if (queue.length > 0) {
+        scheduler.broadcast({ type: 'now-playing', ...queue[0], queue })
+      }
+    }
+
+    if (includeSpeech && playQueue.length > 0 && playQueue.length < LOW_WATER_MARK) {
+      replenishQueueSilently('post-build').catch(() => {})
+    }
+
+    return {
+      say: includeSpeech ? result.say : null,
       say_audio,
       queue,
       reason: result.reason,
       segue: result.segue,
+      intent,
     }
-
-    scheduler.broadcast(latestStationPayload)
-
-    if (queue.length > 0) {
-      scheduler.broadcast({ type: 'now-playing', ...queue[0], queue })
-    }
-  }
-
-  if (includeSpeech && playQueue.length > 0 && playQueue.length < LOW_WATER_MARK) {
-    replenishQueueSilently('post-build').catch(() => {})
-  }
-
-  return {
-    say: includeSpeech ? result.say : null,
-    say_audio,
-    queue,
-    reason: result.reason,
-    segue: result.segue,
-    intent,
-  }
+  })
 }
 
 async function replenishQueueSilently(trigger = 'auto') {
@@ -990,6 +1000,17 @@ app.post('/api/location', async (req, res) => {
 
 // GET /api/next — 弹出队列下一首（前端歌曲结束时调用）
 app.get('/api/next', async (req, res) => {
+  const isPeek = String(req.query?.peek || '') === '1' || String(req.query?.peek || '').toLowerCase() === 'true'
+
+  if (isPeek) {
+    if (playQueue.length < LOW_WATER_MARK) {
+      replenishQueueSilently('peek').catch(() => {})
+    }
+    const peekItem = playQueue[0] || null
+    if (peekItem) return res.json(peekItem)
+    return res.json({ song_info: null, play_url: null, spotify_uri: null })
+  }
+
   let item = queuePop()
   if (!item) {
     await replenishQueueSilently('empty-next')
