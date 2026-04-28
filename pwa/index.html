@@ -947,6 +947,7 @@
   let spotifyCurrentUri = null
   let spotifyProgressTimer = null
   let pendingSpotifyItem = null
+  let spotifyPlayRetryCount = 0
 
   function syncCurrentTrackFromSpotifyState(s) {
     const track = s && s.track_window && s.track_window.current_track
@@ -1032,6 +1033,12 @@
 
     spotifyPlayer.addListener('playback_error', ({ message }) => {
       console.error('[spotify] playback error:', message)
+      if (spotifyPlayRetryCount < 1 && spotifyCurrentUri) {
+        spotifyPlayRetryCount += 1
+        setTimeout(() => spotifyPlay(spotifyCurrentUri).catch(() => {}), 1200)
+        return
+      }
+      spotifyPlayRetryCount = 0
       advanceToNext()
     })
 
@@ -1061,6 +1068,7 @@
       }
       if (!res.ok) return false
       spotifyCurrentUri = uri
+      spotifyPlayRetryCount = 0
       // 启动进度轮询
       clearInterval(spotifyProgressTimer)
       spotifyProgressTimer = setInterval(async () => {
@@ -1071,6 +1079,21 @@
         state.duration = s.duration / 1000
         renderProgress()
       }, 1000)
+      if (state.currentTrack) {
+        fetch('/api/now-playing', {
+          method: 'POST',
+          headers: {
+            'Content-Type': 'application/json',
+          },
+          body: JSON.stringify({
+            song_info: state.currentTrack,
+            play_url: null,
+            spotify_uri: uri,
+            spotify_track: state.currentTrack,
+            source: 'spotify',
+          }),
+        }).catch(() => {})
+      }
       return true
     } catch (e) {
       console.error('[spotify] play failed:', e)

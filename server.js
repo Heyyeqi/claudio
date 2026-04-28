@@ -998,6 +998,31 @@ app.post('/api/location', async (req, res) => {
   }
 })
 
+app.post('/api/now-playing', (req, res) => {
+  const { song_info, play_url, spotify_uri, spotify_track, source } = req.body || {}
+  const info = song_info || null
+  if (!info || !info.name || !info.artist) {
+    return res.status(400).json({ error: 'song_info.name 和 song_info.artist 不能为空' })
+  }
+
+  currentNowPlaying = {
+    id: info.id || null,
+    name: info.name,
+    artist: info.artist,
+  }
+
+  const payload = {
+    song_info: currentNowPlaying,
+    play_url: play_url || null,
+    spotify_uri: spotify_uri || null,
+    spotify_track: spotify_track || null,
+    source: source || null,
+  }
+
+  scheduler.broadcast({ type: 'now-playing', ...payload })
+  return res.json({ ok: true })
+})
+
 // GET /api/next — 弹出队列下一首（前端歌曲结束时调用）
 app.get('/api/next', async (req, res) => {
   const isPeek = String(req.query?.peek || '') === '1' || String(req.query?.peek || '').toLowerCase() === 'true'
