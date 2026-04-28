@@ -2084,7 +2084,7 @@
         isVisible: lunarAltitude > 0,
       },
       stars: {
-        visibility: isNight ? 0.68 : 0,
+        visibility: hourOfDay >= 21 || hourOfDay < 6 ? 0.68 : hourOfDay >= 18 ? 0.32 : 0,
       },
       canvasHintActive: null,
     }
@@ -2652,8 +2652,8 @@
     if (!astronomy) return
     const now = new Date()
     const hour = now.getHours()
-    const isNightHour = hour >= 21 || hour < 6
-    const forcedVisibility = isNightHour ? 0.75 : 0
+    const isNightHour = hour >= 18 || hour < 6
+    const forcedVisibility = isNightHour ? (hour >= 21 || hour < 6 ? 0.75 : 0.35) : 0
     const visibility = Math.max(astronomy.stars?.visibility ?? 0, forcedVisibility)
     if (visibility <= 0.02) return
 
@@ -3425,7 +3425,22 @@
     ctx.rect(0, 0, visualState.width, visualState.height)
     ctx.clip()
 
-    drawPhaseBase(nowMs, state.themeKey, 1)
+    // Canvas 层时段过渡：在 8 分钟过渡期内叠绘前一时段，alpha 从 1→0
+    if (inThemeTransition) {
+      const windows = getPhaseWindows(nowMs, state.sunriseTs, state.sunsetTs)
+      const currentWindow = windows.find(item => item.key === state.themeKey)
+      if (currentWindow) {
+        const transitionDuration = 8 * 60000
+        const t = clamp((nowMs - currentWindow.start) / transitionDuration, 0, 1)
+        const { prev } = getAdjacentThemeKeys(state.themeKey)
+        if (t < 1) {
+          drawPhaseBase(nowMs, prev, 1 - t)
+        }
+      }
+    }
+    drawPhaseBase(nowMs, state.themeKey, inThemeTransition
+      ? clamp((nowMs - (getPhaseWindows(nowMs, state.sunriseTs, state.sunsetTs).find(w => w.key === state.themeKey)?.start || nowMs)) / (8 * 60000), 0, 1)
+      : 1)
     drawStarField(nowMs, state.astronomy, 1)
     drawCloudSystem(nowMs, 1)
     if (state.astronomy) {
@@ -3559,7 +3574,7 @@
   state.themeKey = initialTheme.themeKey
   setTheme(initialTheme.themeState, initialTheme.themeKey)
   renderAll()
-  startWeatherSystem(state.weather, state.astronomy)
+  // 不在此处调用 startWeatherSystem，等 loadInitialState 拿到真实天气数据后再初始化
   loadInitialState().catch((error) => showError(error && error.stack ? error.stack : error))
   connectWs()
   refreshAmbientNow(true).catch(() => {})
