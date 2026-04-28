@@ -1081,6 +1081,8 @@
     isLoading: false,
     showStartOverlay: false,
     heroCommentary: '',
+    lat: 31.2304,  // 默认上海
+    lon: 121.4737,
     messages: [
       { id: makeId('dj'), from: 'dj', text: '跟我说说你想听什么，或者让我来决定。', time: ts() },
     ],
@@ -2658,6 +2660,185 @@
     }
   }
 
+  // ── 真实星表（Yale Bright Star Catalogue 精选，< 4.0等）──────────
+  // 格式：[RA小时, Dec度, 视星等, 色指数B-V, 名称]
+  // RA: 赤经(小时)，Dec: 赤纬(度)，mag: 视星等，bv: 色指数(-0.4蓝~+2红)
+  const STAR_CATALOGUE = [
+    [6.752,-16.716,-1.46,0.00,'天狼'],[6.399,52.694,-0.04,0.08,'五车二'],
+    [14.660,-60.835,-0.27,0.71,'南门二'],[18.615,38.783,0.03,0.22,'织女'],
+    [5.919,7.407,0.18,-0.03,'参宿七'],[7.655,5.225,0.40,1.15,'南河三'],
+    [0.659,56.537,0.54,1.57,'天津四'],[5.278,45.998,0.08,1.65,'五车五'],
+    [12.443,-63.099,0.77,1.09,'十字架二'],[22.961,-29.622,1.17,1.03,'北落师门'],
+    [5.418,-57.237,0.61,-0.23,'水委一'],[5.603,-1.202,0.45,-0.22,'参宿七'],
+    [13.420,-11.161,0.98,1.23,'角宿一'],[15.738,26.715,0.15,-0.23,'大角'],
+    [20.690,45.280,1.25,0.09,'天津四'],[4.598,16.510,0.87,1.54,'毕宿五'],
+    [1.979,89.264,2.02,0.60,'北极星'],[12.264,57.032,1.77,-0.11,'北斗五'],
+    [11.062,61.751,1.77,0.08,'北斗四'],[13.792,49.313,1.86,0.07,'北斗七'],
+    [11.897,53.695,2.37,0.08,'北斗六'],[12.900,55.960,1.79,-0.02,'北斗六'],
+    [10.279,19.841,1.98,0.54,'轩辕十四'],[14.177,14.390,2.23,1.16,'天蝎α'],
+    [16.490,-26.432,1.05,1.83,'心宿二'],[19.846,8.867,0.77,0.22,'牛郎'],
+    [5.242,-8.202,1.70,-0.22,'参宿五'],[5.534,-5.909,2.06,-0.21,'参宿二'],
+    [5.679,-1.943,1.69,-0.22,'参宿三'],[5.576,-1.203,2.09,0.13,'参宿一'],
+    [5.795,7.407,0.45,-0.03,'参宿七β'],[6.063,-52.696,1.87,0.13,'老人星α'],
+    [7.576,31.889,1.93,0.00,'双子α'],[7.755,28.026,1.14,0.04,'双子β'],
+    [20.374,40.257,1.33,0.09,'天鹅α'],[20.742,33.970,3.08,0.09,'天鹅γ'],
+    [20.690,45.280,1.25,0.09,'天鹅ε'],[21.218,62.585,2.23,0.09,'天鹅ζ'],
+    [3.791,24.105,2.87,0.09,'昴宿'],[3.740,24.367,3.71,0.09,'昴宿二'],
+    [3.741,24.113,3.63,0.09,'昴宿三'],[2.531,89.264,2.02,0.60,'勾陈一'],
+    [23.079,15.206,2.83,0.09,'飞马ε'],[22.691,10.831,2.49,0.09,'飞马α'],
+    [23.063,28.082,2.42,0.09,'飞马β'],[0.221,15.183,2.07,0.09,'壁宿一'],
+    [1.103,35.620,2.07,0.09,'仙女α'],[0.946,60.717,2.27,0.09,'仙后β'],
+    [0.675,56.537,2.24,0.09,'仙后α'],[1.430,60.235,2.68,0.09,'仙后γ'],
+    [14.849,74.155,2.08,1.06,'勾陈二'],[15.341,71.834,3.07,0.09,'北极四'],
+    [17.146,14.390,2.77,0.09,'蛇夫α'],[17.583,12.560,2.43,0.09,'蛇夫η'],
+    [18.919,2.772,3.23,0.09,'天鹰β'],[19.090,13.863,2.72,0.09,'天鹰γ'],
+    [9.460,-8.658,2.00,1.68,'长蛇α'],[10.332,-16.834,3.11,0.09,'长蛇γ'],
+    [6.627,16.399,3.53,0.09,'双子μ'],[6.482,20.212,1.93,0.00,'双子γ'],
+    [22.137,-46.961,1.74,1.55,'南鱼α'],[8.923,48.042,1.93,0.09,'大熊α'],
+    [11.031,56.382,2.37,0.09,'大熊β'],[11.062,61.751,1.77,0.08,'大熊γ'],
+    [12.257,57.032,3.31,0.09,'大熊δ'],[12.900,55.960,1.79,-0.02,'大熊ε'],
+    [13.399,54.925,2.44,0.09,'大熊ζ'],[13.792,49.313,1.86,0.07,'大熊η'],
+    [15.035,40.390,2.23,0.09,'牧夫β'],[14.748,27.074,3.58,0.09,'牧夫γ'],
+    [15.258,33.314,2.68,0.09,'牧夫δ'],[14.530,30.371,2.35,0.09,'牧夫ε'],
+    [21.736,-16.127,2.72,0.09,'摩羯α'],[21.784,-12.507,3.05,0.09,'摩羯β'],
+    [20.947,-17.232,3.69,0.09,'摩羯γ'],[21.099,-11.372,2.85,0.09,'摩羯δ'],
+    [22.361,-0.019,2.96,0.09,'宝瓶α'],[22.589,0.019,2.91,0.09,'宝瓶β'],
+    [22.480,-0.019,3.84,0.09,'宝瓶γ'],[22.827,-7.578,3.27,0.09,'宝瓶δ'],
+    [16.836,34.298,2.23,0.09,'武仙α'],[17.244,24.839,2.77,0.09,'武仙β'],
+    [16.503,21.490,3.12,0.09,'武仙γ'],[17.005,30.926,3.16,0.09,'武仙δ'],
+    [4.300,15.618,2.65,0.09,'金牛β'],[5.438,28.607,2.97,0.09,'金牛α'],
+    [3.413,49.861,2.85,1.28,'英仙α'],[3.158,40.956,2.12,0.48,'英仙β'],
+    [3.964,40.012,2.90,0.09,'英仙γ'],[4.048,47.713,3.01,0.09,'英仙δ'],
+    [10.897,-17.684,2.58,0.09,'乌鸦γ'],[12.141,-22.620,2.65,0.09,'乌鸦δ'],
+    [4.857,-5.086,2.77,0.09,'猎户ε'],[5.031,-5.909,2.06,-0.21,'猎户ζ'],
+    [5.233,6.349,2.06,0.09,'猎户δ'],[5.585,9.934,2.09,0.09,'猎户κ'],
+    [18.302,-36.762,1.85,0.09,'人马ε'],[19.043,-29.880,2.72,0.09,'人马σ'],
+    [18.350,-26.297,2.82,0.09,'人马ζ'],[18.923,-26.296,2.72,0.09,'人马λ'],
+    [19.162,-21.023,3.17,0.09,'人马μ'],[18.220,-34.384,2.99,0.09,'人马δ'],
+    [16.241,-3.694,2.56,0.09,'天蝎β'],[16.352,-25.592,2.62,0.09,'天蝎δ'],
+    [16.005,-22.622,3.19,0.09,'天蝎ε'],[17.622,-37.104,1.63,0.09,'天蝎λ'],
+    [17.708,-39.030,2.82,0.09,'天蝎υ'],[16.836,-34.293,2.69,0.09,'天蝎θ'],
+  ]
+
+  // ── 星座连线（主要星座，IAU 标准）──────────────────────────────
+  // 格式：[[星名1, 星名2], ...]
+  const CONSTELLATION_LINES = [
+    // 猎户座
+    ['参宿七','参宿五'],['参宿五','参宿三'],['参宿三','参宿一'],['参宿一','参宿二'],
+    ['参宿二','参宿七'],['参宿五','参宿七β'],['参宿一','参宿二'],
+    // 大熊座（北斗七星）
+    ['大熊α','大熊β'],['大熊β','大熊γ'],['大熊γ','大熊δ'],
+    ['大熊δ','大熊ε'],['大熊ε','大熊ζ'],['大熊ζ','大熊η'],
+    // 仙后座
+    ['仙后α','仙后β'],['仙后β','仙后γ'],['仙后γ','仙后α'],
+    // 天鹅座
+    ['天津四','天鹅γ'],['天鹅γ','天鹅ε'],['天鹅γ','天鹅ζ'],
+    // 天蝎座
+    ['心宿二','天蝎δ'],['天蝎δ','天蝎β'],['心宿二','天蝎θ'],['天蝎θ','天蝎λ'],
+    // 飞马座
+    ['飞马α','飞马β'],['飞马β','壁宿一'],['壁宿一','仙女α'],['仙女α','飞马ε'],['飞马ε','飞马α'],
+    // 双子座
+    ['双子α','双子β'],['双子α','双子γ'],['双子β','双子μ'],
+  ]
+
+  // ── 天文坐标转换工具 ────────────────────────────────────────────
+  function toRad(deg) { return deg * Math.PI / 180 }
+  function toDeg(rad) { return rad * 180 / Math.PI }
+
+  // 儒略日
+  function julianDay(date) {
+    return date.getTime() / 86400000 + 2440587.5
+  }
+
+  // 格林威治恒星时（度）
+  function greenwichSiderealTime(jd) {
+    const T = (jd - 2451545.0) / 36525
+    let gst = 280.46061837 + 360.98564736629 * (jd - 2451545)
+      + 0.000387933 * T * T - T * T * T / 38710000
+    return ((gst % 360) + 360) % 360
+  }
+
+  // 赤道坐标 → 地平坐标
+  // ra: 赤经(小时), dec: 赤纬(度), lat: 纬度(度), lst: 本地恒星时(度)
+  // 返回 { alt: 高度角(度), az: 方位角(度) }
+  function equatorialToHorizontal(ra, dec, lat, lst) {
+    const ha = toRad(lst - ra * 15)  // 时角
+    const decR = toRad(dec)
+    const latR = toRad(lat)
+    const sinAlt = Math.sin(decR) * Math.sin(latR) + Math.cos(decR) * Math.cos(latR) * Math.cos(ha)
+    const alt = toDeg(Math.asin(Math.max(-1, Math.min(1, sinAlt))))
+    const cosAz = (Math.sin(decR) - Math.sin(toRad(alt)) * Math.sin(latR)) / (Math.cos(toRad(alt)) * Math.cos(latR))
+    let az = toDeg(Math.acos(Math.max(-1, Math.min(1, cosAz))))
+    if (Math.sin(ha) > 0) az = 360 - az
+    return { alt, az }
+  }
+
+  // 地平坐标 → Canvas 投影（立体投影，北在上）
+  // alt: 高度角(度), az: 方位角(度), width, height, maxY
+  // 返回 { x, y } 或 null（地平线以下）
+  function horizontalToCanvas(alt, az, width, maxY) {
+    if (alt < -5) return null  // 地平线以下不显示
+    // 立体投影：高度角越大越靠近中心
+    const r = (90 - alt) / 90  // 0=天顶, 1=地平
+    const azR = toRad(az - 180)  // 南在下，北在上
+    const cx = width / 2
+    const cy = maxY * 0.42  // 天顶位置
+    const scale = Math.min(cx, maxY) * 0.95
+    const x = cx + r * scale * Math.sin(azR)
+    const y = cy - r * scale * Math.cos(azR)
+    if (y < 0 || y > maxY || x < 0 || x > width) return null
+    return { x, y }
+  }
+
+  // 色指数 B-V → RGB 颜色
+  function bvToColor(bv) {
+    // 蓝白星(bv<0): 蓝白, 白星(bv≈0): 白, 黄星(bv≈0.6): 暖白, 红星(bv>1.5): 橙红
+    if (bv < -0.2) return '180,200,255'
+    if (bv < 0.1) return '220,230,255'
+    if (bv < 0.4) return '240,240,255'
+    if (bv < 0.8) return '255,244,230'
+    if (bv < 1.4) return '255,220,180'
+    return '255,190,140'
+  }
+
+  // 视星等 → 半径
+  function magToRadius(mag) {
+    // mag: -1.5(最亮) ~ 4.0(最暗)，映射到 0.6~2.4px
+    return Math.max(0.5, 2.4 - (mag + 1.5) * 0.45)
+  }
+
+  // 视星等 → 基础 alpha
+  function magToAlpha(mag) {
+    return Math.max(0.15, Math.min(1.0, 1.1 - mag * 0.18))
+  }
+
+  // 缓存：上次计算时间戳和结果（每分钟重算一次）
+  let starPositionCache = null
+  let starPositionCacheAt = 0
+  const STAR_CACHE_INTERVAL = 60000  // 1分钟
+
+  function computeStarPositions(nowMs, lat, lon, width, maxY) {
+    if (starPositionCache && nowMs - starPositionCacheAt < STAR_CACHE_INTERVAL) {
+      return starPositionCache
+    }
+    const jd = julianDay(new Date(nowMs))
+    const gst = greenwichSiderealTime(jd)
+    const lst = ((gst + lon + 360) % 360)  // 本地恒星时
+
+    const nameIndex = {}
+    const positions = STAR_CATALOGUE.map(([ra, dec, mag, bv, name]) => {
+      const { alt, az } = equatorialToHorizontal(ra, dec, lat, lst)
+      const pos = horizontalToCanvas(alt, az, width, maxY)
+      const entry = { ra, dec, mag, bv, name, alt, az, pos }
+      nameIndex[name] = entry
+      return entry
+    }).filter(s => s.pos !== null)
+
+    starPositionCache = { positions, nameIndex }
+    starPositionCacheAt = nowMs
+    return starPositionCache
+  }
+
   function drawStarField(nowMs, astronomy, alphaScale) {
     if (!astronomy) return
     const now = new Date()
@@ -2668,53 +2849,74 @@
     if (visibility <= 0.02) return
 
     const moonSuppression = astronomy.lunar?.isVisible
-      ? (astronomy.lunar.illumination || 0) * 0.25
+      ? (astronomy.lunar.illumination || 0) * 0.22
       : 0
-    const effectiveVisibility = Math.max(0.15, visibility - moonSuppression)
+    const effectiveVisibility = Math.max(0.12, visibility - moonSuppression)
     if (effectiveVisibility <= 0.02) return
-
-    const sf = visualState.starField
-    if (!sf) return
 
     const width = visualState.width
     const height = visualState.height
     const maxY = heroMaxY()
+    const lat = state.lat || 31.2304
+    const lon = state.lon || 121.4737
+
+    const { positions, nameIndex } = computeStarPositions(nowMs, lat, lon, width, maxY)
 
     withHeroClip(() => {
-      const drawLayer = (stars, layerAlphaMultiplier) => {
-        stars.forEach((star) => {
-          if (star.y < 0 || star.y > maxY) star.y = rand(0, maxY * 0.98)
-          const twinkle = 0.7 + 0.3 * Math.sin(nowMs / star.period * Math.PI * 2 + star.phase)
-          const alpha = star.baseAlpha * twinkle * effectiveVisibility * layerAlphaMultiplier * alphaScale * 1.8
-          if (alpha < 0.01) return
+      // 星座连线（先画，在星点下面）
+      ctx.save()
+      CONSTELLATION_LINES.forEach(([a, b]) => {
+        const sa = nameIndex[a]
+        const sb = nameIndex[b]
+        if (!sa?.pos || !sb?.pos) return
+        const lineAlpha = effectiveVisibility * alphaScale * 0.12
+        if (lineAlpha < 0.01) return
+        ctx.strokeStyle = `rgba(180,190,220,${lineAlpha.toFixed(4)})`
+        ctx.lineWidth = 0.5
+        ctx.beginPath()
+        ctx.moveTo(sa.pos.x, sa.pos.y)
+        ctx.lineTo(sb.pos.x, sb.pos.y)
+        ctx.stroke()
+      })
+      ctx.restore()
 
-        if (star.size > 1.6 && alpha > 0.3) {
-          ctx.strokeStyle = `rgba(${star.color},${(alpha * 0.3).toFixed(4)})`
+      // 星点
+      positions.forEach((star) => {
+        const { pos, mag, bv } = star
+        const color = bvToColor(bv)
+        const radius = magToRadius(mag)
+        const baseAlpha = magToAlpha(mag)
+        // 闪烁：用 RA+Dec 做种子，每颗星独立节奏
+        const twinkleSeed = (star.ra * 1000 + Math.abs(star.dec) * 100) % 7000 + 2000
+        const twinkle = 0.75 + 0.25 * Math.sin(nowMs / twinkleSeed * Math.PI * 2)
+        const alpha = baseAlpha * twinkle * effectiveVisibility * alphaScale
+
+        if (alpha < 0.01) return
+
+        // 亮星加十字光晕
+        if (mag < 1.5 && alpha > 0.25) {
+          ctx.strokeStyle = `rgba(${color},${(alpha * 0.25).toFixed(4)})`
           ctx.lineWidth = 0.5
           ctx.beginPath()
-          ctx.moveTo(star.x - star.size * 2.5, star.y)
-          ctx.lineTo(star.x + star.size * 2.5, star.y)
-          ctx.moveTo(star.x, star.y - star.size * 2.5)
-          ctx.lineTo(star.x, star.y + star.size * 2.5)
+          ctx.moveTo(pos.x - radius * 3, pos.y)
+          ctx.lineTo(pos.x + radius * 3, pos.y)
+          ctx.moveTo(pos.x, pos.y - radius * 3)
+          ctx.lineTo(pos.x, pos.y + radius * 3)
           ctx.stroke()
         }
 
         ctx.beginPath()
-        ctx.fillStyle = `rgba(${star.color},${alpha.toFixed(4)})`
-        ctx.arc(star.x, star.y, star.size, 0, Math.PI * 2)
+        ctx.fillStyle = `rgba(${color},${alpha.toFixed(4)})`
+        ctx.arc(pos.x, pos.y, radius, 0, Math.PI * 2)
         ctx.fill()
-        })
-      }
-
-      drawLayer(sf.dim, 1)
-      drawLayer(sf.medium, 1)
-      drawLayer(sf.bright, 1)
+      })
     })
 
+    // 流星
+    const sf = visualState.starField
+    if (!sf) return
     const minutesSinceLast = (nowMs - sf.lastShootingStarAt) / 60000
-    const shootingStarProbability = effectiveVisibility > 0.5
-      ? 0.00004 * effectiveVisibility
-      : 0
+    const shootingStarProbability = effectiveVisibility > 0.5 ? 0.00004 * effectiveVisibility : 0
 
     if (minutesSinceLast > 1 && Math.random() < shootingStarProbability) {
       sf.shootingStars.push({
@@ -2733,7 +2935,6 @@
       const age = nowMs - ss.born
       const lifetime = 900
       if (age > lifetime) return false
-
       const progress = age / lifetime
       const alpha = ss.alpha * (1 - progress) * effectiveVisibility * alphaScale
       const tailX = ss.x - ss.vx * (ss.length / 5)
@@ -2749,12 +2950,9 @@
         ctx.lineTo(ss.x, ss.y)
         ctx.stroke()
       })
-
       ss.x += ss.vx
       ss.y += ss.vy
-      if (ss.y < 0 || ss.y > maxY) {
-        ss.y = rand(height * 0.02, Math.min(maxY * 0.5, height * 0.35))
-      }
+      if (ss.y < 0 || ss.y > maxY) ss.y = rand(height * 0.02, Math.min(maxY * 0.5, height * 0.35))
       return true
     })
   }
@@ -3558,6 +3756,8 @@
     navigator.geolocation.getCurrentPosition(
       async (position) => {
         try {
+          state.lat = position.coords.latitude
+          state.lon = position.coords.longitude
           await fetch('/api/location', {
             method: 'POST',
             headers: { 'Content-Type': 'application/json' },
