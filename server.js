@@ -574,30 +574,49 @@ async function ncmGetUrl(songId, name, artist) {
 // 并行解析一批歌曲，返回有直链的条目
 async function resolveQueue(songs) {
   const useSpotify = spotify.hasUserToken()
+  const spotifyQueue = []
+  const ncmFallbackSongs = []
 
-  const results = await Promise.all(
-    songs.map(async song => {
+  await Promise.all(
+    songs.map(async (song, index) => {
       try {
-        // 优先 Spotify（有用户 token 时）
         if (useSpotify) {
           const uri = await spotify.searchTrack(song.name, song.artist)
           if (uri) {
             console.log(`[spotify] 命中 "${song.name} / ${song.artist}" -> ${uri}`)
-            return { song_info: { ...song }, spotify_uri: uri, play_url: null, source: 'spotify' }
+            spotifyQueue[index] = {
+              song_info: { ...song },
+              spotify_uri: uri,
+              play_url: null,
+              source: 'spotify',
+            }
+            return
           }
           console.log(`[spotify] 未找到 "${song.name}"，fallback NCM`)
         }
-        // NCM 兜底
-        const { url, id: realId } = await ncmGetUrl(song.id, song.name, song.artist)
-        if (!url) return null
-        return { song_info: { ...song, id: realId || song.id }, play_url: url, source: 'ncm' }
+        ncmFallbackSongs.push({ song, index })
       } catch (e) {
         console.error(`[queue] 解析 "${song.name}" 失败:`, e.message)
-        return null
       }
     })
   )
-  return results.filter(Boolean)
+
+  const ncmResults = await Promise.all(
+    ncmFallbackSongs
+      .sort((a, b) => a.index - b.index)
+      .map(async ({ song }) => {
+        try {
+          const { url, id: realId } = await ncmGetUrl(song.id, song.name, song.artist)
+          if (!url) return null
+          return { song_info: { ...song, id: realId || song.id }, play_url: url, source: 'ncm' }
+        } catch (e) {
+          console.error(`[queue] 解析 "${song.name}" 失败:`, e.message)
+          return null
+        }
+      })
+  )
+
+  return [...spotifyQueue.filter(Boolean), ...ncmResults.filter(Boolean)]
 }
 
 async function buildDjResponse(input, options = {}) {
