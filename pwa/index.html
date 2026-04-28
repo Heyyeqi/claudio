@@ -93,6 +93,7 @@
     height: 100%;
     display: flex;
     flex-direction: column;
+    overflow: hidden;
   }
 
   .topbar {
@@ -109,11 +110,12 @@
 
   .hero {
     position: relative;
-    flex: 0 0 60%;
-    min-height: 360px;
-    padding: 26px 28px 0;
+    flex: 1;
+    min-height: 0;
+    padding: 20px 28px 0;
     display: flex;
     flex-direction: column;
+    overflow: hidden;
   }
 
   .hero-meta {
@@ -197,12 +199,13 @@
     position: relative;
     z-index: 2;
     flex: 1;
+    min-height: 0;
     display: flex;
     flex-direction: column;
     align-items: center;
     justify-content: center;
     text-align: center;
-    margin-top: -22px;
+    padding-bottom: 16px;
   }
 
   .hero-title {
@@ -239,11 +242,11 @@
   }
 
   .hero-commentary {
-    margin-top: 40px;
+    margin-top: 20px;
     max-width: 72%;
     min-height: 34px;
     font-family: "Cormorant Garamond", "Noto Serif SC", serif;
-    font-size: 14px;
+    font-size: 13px;
     font-style: italic;
     font-weight: 400;
     line-height: 2;
@@ -267,7 +270,8 @@
   .progress-wrap {
     position: relative;
     z-index: 2;
-    padding: 0 28px 20px;
+    padding: 16px 28px;
+    flex-shrink: 0;
   }
 
   .progress-line {
@@ -295,11 +299,12 @@
   }
 
   .controls {
-    flex: 0 0 60px;
+    height: 64px;
+    flex-shrink: 0;
     display: flex;
     align-items: center;
     justify-content: center;
-    gap: 24px;
+    gap: 28px;
     border-top: 1px solid var(--line);
     border-bottom: 1px solid var(--line);
   }
