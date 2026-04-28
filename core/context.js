@@ -203,7 +203,7 @@ async function fetchCityLabelByCoords(lat, lon, fallbackLabel) {
     // 用 Nominatim（OpenStreetMap）反地理编码，精度到区县级，免费无需 Key
     const url = `https://nominatim.openstreetmap.org/reverse?lat=${lat}&lon=${lon}&format=json&accept-language=zh,en&zoom=12`
     const res = await fetchJsonWithTimeout(url, {
-      headers: { 'User-Agent': 'Claudio/1.0 (personal music app)' }
+      headers: { 'User-Agent': 'RodiO/1.0 (personal music app)' }
     })
     const data = await res.json()
     const addr = data?.address

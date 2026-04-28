@@ -1456,7 +1456,7 @@
       heroTitle.style.fontSize = 'clamp(22px, 4.2vw, 30px)'
       heroTitle.style.lineHeight = '1.1'
     }
-    heroArtist.textContent = state.currentTrack && state.currentTrack.artist ? state.currentTrack.artist : 'Claudio FM'
+    heroArtist.textContent = state.currentTrack && state.currentTrack.artist ? state.currentTrack.artist : 'RodiO FM'
     const city = state.weather && (state.weather.city || state.weather.locationName)
     heroCity.textContent = city ? String(city).toUpperCase() : ''
     heroCommentary.textContent = state.heroCommentary || ''
@@ -1490,7 +1490,7 @@
   function renderQueue() {
     queueCount.textContent = `${state.queue.length} TRACKS`
     if (state.queue.length === 0) {
-      queueList.innerHTML = '<div style="font-size:13px;color:var(--text-sub)">DJ Speak to Claudio to build a queue</div>'
+      queueList.innerHTML = '<div style="font-size:13px;color:var(--text-sub)">DJ Speak to RodiO to build a queue</div>'
       return
     }
     queueList.innerHTML = state.queue.slice(0, 4).map((item, index) => `

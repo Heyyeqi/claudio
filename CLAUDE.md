@@ -1,4 +1,4 @@
-# CLAUDE.md — Claudio 个人 AI 电台
+# CLAUDE.md — RodiO 个人 AI 电台
 
 你是这个项目的架构师和执行者。请完整读完这份文档再开始任何操作。
 
@@ -6,7 +6,7 @@
 
 ## 项目定位
 
-Claudio 是一个运行在本地的个人 AI 电台。它读懂用户的音乐品味，像 DJ 一样播报，
+RodiO 是一个运行在本地的个人 AI 电台。它读懂用户的音乐品味，像 DJ 一样播报，
 用语音衔接每首歌，天气和时间会影响选曲逻辑。
 
 **技术栈：** Node.js + Express · SQLite · PWA · Fish Audio TTS · 网易云音乐 API · Claude API
@@ -356,7 +356,7 @@ R&B、慢摇、带质感的流行、举重若轻的编曲
 ```markdown
 # DJ 人格设定
 
-你是 Claudio，一个有品味、克制、不废话的私人 DJ。
+你是 RodiO，一个有品味、克制、不废话的私人 DJ。
 
 你了解听众十几年的歌单，知道他什么时候需要什么歌。
 你说话简洁，有温度，偶尔一句话让人心里一动。
@@ -397,7 +397,7 @@ R&B、慢摇、带质感的流行、举重若轻的编曲
 # 终端 1：网易云 API
 cd ../NeteaseCloudMusicApi && node app.js
 
-# 终端 2：Claudio 主服务
+# 终端 2：RodiO 主服务
 cd claudio && node server.js
 
 # 浏览器

@@ -1,4 +1,4 @@
-# Claudio FM — 项目状态文档
+# RodiO FM — 项目状态文档
 
 > 记录于 2026-04-26。方便在新环境继续开发。
 
@@ -6,7 +6,7 @@
 
 ## 一、项目概述
 
-Claudio 是一个运行在本地的个人 AI 电台。核心体验：用自然语言告诉 AI DJ 你想听什么或什么都不说，它根据你的真实歌单、当前时间、天气自动选曲，用语音播报每批歌的氛围，然后一首接一首连续播放。
+RodiO 是一个运行在本地的个人 AI 电台。核心体验：用自然语言告诉 AI DJ 你想听什么或什么都不说，它根据你的真实歌单、当前时间、天气自动选曲，用语音播报每批歌的氛围，然后一首接一首连续播放。
 
 **技术栈：** Node.js (v24) · Express · SQLite · React 18 · msedge-tts · 通义千问 qwen-max · 网易云音乐 API (非官方本地部署)
 
@@ -234,7 +234,7 @@ PORT=8080
 cd ~/Projects/NeteaseCloudMusicApi
 node app.js
 
-# 终端 2：Claudio
+# 终端 2：RodiO
 cd ~/Projects/claudio
 node server.js
 
@@ -276,4 +276,3 @@ node scripts/ncm-login.js
 - [ ] 定时任务触发时通过 `/api/chat` 同路径自动解析并加入前端队列
 - [ ] 将 React/Babel 改为本地 vendor，去除 CDN 依赖
 - [ ] 给 `plays` 表增加 `rating` 字段，支持收藏/屏蔽
-

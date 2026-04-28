@@ -70,7 +70,7 @@ async function main() {
       fs.mkdirSync(path.dirname(COOKIE_PATH), { recursive: true })
       fs.writeFileSync(COOKIE_PATH, JSON.stringify({ raw: cookie, parsed: cookieObj, saved_at: new Date().toISOString() }, null, 2))
       console.log(`\nCookie 已保存到 user/ncm-cookie.json`)
-      console.log('现在可以启动 claudio：node server.js\n')
+      console.log('现在可以启动 RodiO：node server.js\n')
       process.exit(0)
     }
 
