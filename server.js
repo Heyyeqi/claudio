@@ -15,6 +15,7 @@ const tts = require('./core/tts')
 const state = require('./core/state')
 const scheduler = require('./core/scheduler')
 const { getAstronomyContext } = require('./core/astronomy')
+const spotify = require('./core/spotify')
 
 const explainClient = new OpenAI({
   apiKey: process.env.DASHSCOPE_API_KEY,
@@ -564,14 +565,26 @@ async function ncmGetUrl(songId, name, artist) {
 
 // 并行解析一批歌曲，返回有直链的条目
 async function resolveQueue(songs) {
+  const useSpotify = spotify.hasUserToken()
+
   const results = await Promise.all(
     songs.map(async song => {
       try {
+        // 优先 Spotify（有用户 token 时）
+        if (useSpotify) {
+          const uri = await spotify.searchTrack(song.name, song.artist)
+          if (uri) {
+            console.log(`[spotify] 命中 "${song.name} / ${song.artist}" -> ${uri}`)
+            return { song_info: { ...song }, spotify_uri: uri, play_url: null, source: 'spotify' }
+          }
+          console.log(`[spotify] 未找到 "${song.name}"，fallback NCM`)
+        }
+        // NCM 兜底
         const { url, id: realId } = await ncmGetUrl(song.id, song.name, song.artist)
         if (!url) return null
-        return { song_info: { ...song, id: realId || song.id }, play_url: url }
+        return { song_info: { ...song, id: realId || song.id }, play_url: url, source: 'ncm' }
       } catch (e) {
-        console.error(`[ncm] 解析 "${song.name}" 失败:`, e.message)
+        console.error(`[queue] 解析 "${song.name}" 失败:`, e.message)
         return null
       }
     })
@@ -1061,6 +1074,48 @@ app.get('/api/taste', (req, res) => {
 app.get('/api/plan/today', (req, res) => {
   const plays = state.getRecentPlays(20)
   res.json({ today_count: scheduler.getTodayCount(), recent_plays: plays })
+})
+
+// ── Spotify OAuth ─────────────────────────────────────────────────
+// GET /auth/spotify — 跳转到 Spotify 授权页
+app.get('/auth/spotify', (req, res) => {
+  const url = spotify.getAuthUrl('claudio')
+  res.redirect(url)
+})
+
+// GET /callback — Spotify 授权回调
+app.get('/callback', async (req, res) => {
+  const { code, error } = req.query
+  if (error || !code) {
+    return res.send(`<script>window.close()</script><p>授权失败：${error || '无 code'}</p>`)
+  }
+  try {
+    await spotify.exchangeCode(code)
+    console.log('[spotify] 用户授权成功，Spotify 播放已启用')
+    res.send(`
+      <html><body style="background:#080808;color:#C9A96E;font-family:sans-serif;display:flex;align-items:center;justify-content:center;height:100vh;margin:0">
+        <div style="text-align:center">
+          <p style="font-size:18px;margin-bottom:8px">✓ Spotify 已连接</p>
+          <p style="font-size:13px;opacity:0.6">可以关闭此页面</p>
+          <script>setTimeout(()=>window.close(),1500)</script>
+        </div>
+      </body></html>
+    `)
+  } catch (e) {
+    console.error('[spotify] callback 失败:', e.message)
+    res.send(`<p>授权失败：${e.message}</p>`)
+  }
+})
+
+// GET /api/spotify/status — 前端查询授权状态和 token
+app.get('/api/spotify/status', async (req, res) => {
+  const connected = spotify.hasUserToken()
+  const token = connected ? await spotify.getUserToken() : null
+  res.json({
+    connected,
+    access_token: token,
+    auth_url: connected ? null : '/auth/spotify',
+  })
 })
 
 const PORT = process.env.PORT || 8080
