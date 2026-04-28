@@ -81,6 +81,9 @@ function loadNcmIdMap() {
 
 let ncmIdMap = loadNcmIdMap()
 let recentRecommendedKeys = loadRecentRecommendedKeys()
+let lastWeatherMain = null
+let weatherPollTimer = null
+const WEATHER_POLL_INTERVAL = 5 * 60 * 1000 // 5分钟
 
 function queuePop() {
   return playQueue.shift() || null
@@ -179,6 +182,64 @@ function rememberRecentRecommendedQueue(queue) {
 
 function getRecentRecommendedKeySet() {
   return new Set(recentRecommendedKeys)
+}
+
+async function checkWeatherChange() {
+  try {
+    const coords = context.getStoredCoordinates()
+    const weather = coords
+      ? await context.fetchWeatherByCoords(coords.lat, coords.lon)
+      : await context.fetchWeatherByCity()
+
+    const currentMain = weather?.main || null
+    if (!currentMain) return
+
+    // 首次记录，不触发
+    if (lastWeatherMain === null) {
+      lastWeatherMain = currentMain
+      return
+    }
+
+    // 天气没变，不触发
+    if (lastWeatherMain === currentMain) return
+
+    const prevMain = lastWeatherMain
+    lastWeatherMain = currentMain
+
+    console.log(`[claudio] 天气变化: ${prevMain} → ${currentMain}，触发重新选曲`)
+
+    // 构造有质感的天气变化 prompt，让 AI 感知变化本身
+    const weatherTransitionPrompts = {
+      Rain: `天空开始下雨了，从${prevMain}变成了雨天。雨不只是一种天气，是一种心情的转场。根据此刻的城市、时间和季节，选几首最契合这场雨质感的歌——不要只是"雨歌单"，要感受这场雨是绵长的还是急促的，是春雨还是秋雨。`,
+      Clear: `雨停了，天空放晴，从${prevMain}变成了晴天。阳光重新出现时，人的心情会有一种特别的轻盈感。选几首能捕捉这种"雨后"情绪的歌，不一定是欢快的，可以是安静的满足。`,
+      Clouds: `天空开始转阴，云层聚拢，从${prevMain}变成了阴天。这种光线的改变会带来微妙的情绪转变，选几首符合阴天质感的歌。`,
+      Snow: `开始下雪了，从${prevMain}变成了雪天。雪是一种特殊的安静，选几首能配得上雪落时那种空旷感的音乐。`,
+      Thunderstorm: `雷雨来了，从${prevMain}变成了雷暴天气。这种天气有一种戏剧性，选几首有张力的歌。`,
+      Drizzle: `开始飘起细雨，从${prevMain}变成了毛毛雨。选几首适合这种若即若离的雨天质感的歌。`,
+      Mist: `雾气弥漫，从${prevMain}变成了雾天。选几首有朦胧感的音乐。`,
+      Haze: `变得有些灰蒙蒙的，从${prevMain}变成了霾天。选几首不那么明亮、有些内敛的音乐。`,
+    }
+
+    const prompt = weatherTransitionPrompts[currentMain]
+      || `天气从${prevMain}变成了${currentMain}，根据这个变化和当前时间地点，选几首最契合此刻的歌。`
+
+    scheduler.broadcast({
+      type: 'weather-change',
+      from: prevMain,
+      to: currentMain,
+      weather,
+    })
+
+    const result = await buildDjResponse(prompt, {
+      persistMessages: false,
+      broadcast: true,
+      appendQueue: false,
+    })
+
+    console.log(`[claudio] 天气变化选曲完成，生成 ${result.queue.length} 首`)
+  } catch (e) {
+    console.error('[claudio] 天气变化检测失败:', e.message)
+  }
 }
 
 function makeSongPayload(song) {
@@ -648,6 +709,15 @@ async function bootstrapStation() {
       broadcast: true,
     })
     console.log(`[claudio] 开机自动选曲完成，生成 ${result.queue.length} 首`)
+
+    // 记录初始天气状态
+    const initWeather = await context.getWeather()
+    lastWeatherMain = initWeather?.main || null
+    console.log(`[claudio] 初始天气: ${lastWeatherMain}，开始天气监测`)
+
+    // 启动天气轮询
+    if (weatherPollTimer) clearInterval(weatherPollTimer)
+    weatherPollTimer = setInterval(checkWeatherChange, WEATHER_POLL_INTERVAL)
   } catch (e) {
     console.error('[claudio] 开机自动选曲失败:', e.message)
   }

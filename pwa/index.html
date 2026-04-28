@@ -1788,6 +1788,21 @@
           startWeatherSystem(state.weather, state.astronomy)
           renderHero()
         }
+        if (data.type === 'weather-change') {
+          const weatherLabels = {
+            Rain: '雨',
+            Clear: '晴',
+            Clouds: '阴',
+            Snow: '雪',
+            Thunderstorm: '雷雨',
+            Drizzle: '细雨',
+            Mist: '雾',
+            Haze: '霾',
+          }
+          const toLabel = weatherLabels[data.to] || data.to
+          appendDj(`天气变了，外面开始${toLabel}了。`)
+          return
+        }
         if (data.type === 'playlist-ready') {
           stationPayload = data
         }
