@@ -102,6 +102,11 @@ function makeSongLookupKey(name, artist) {
   return `${normalizeNcmText(name)}::${normalizeNcmText(artist)}`
 }
 
+function isLikelyNcmSongId(songId) {
+  const id = String(songId || '').trim()
+  return /^\d{6,}$/.test(id)
+}
+
 function persistNcmIdMap() {
   const entries = Object.entries(ncmIdMap)
     .sort((a, b) => (b[1]?.updatedAt || 0) - (a[1]?.updatedAt || 0))
@@ -117,15 +122,21 @@ function rememberSongIdMapping(name, artist, songId, status = 'hit') {
 }
 
 function getRememberedSongId(name, artist) {
-  const remembered = ncmIdMap[makeSongLookupKey(name, artist)]
+  const key = makeSongLookupKey(name, artist)
+  const remembered = ncmIdMap[key]
   if (!remembered) return null
+  if (remembered.status === 'hit' && !isLikelyNcmSongId(remembered.id)) {
+    delete ncmIdMap[key]
+    persistNcmIdMap()
+    return null
+  }
   if (remembered.status === 'miss' && Date.now() - remembered.updatedAt > SEARCH_CACHE_MISS_TTL_MS) {
-    delete ncmIdMap[makeSongLookupKey(name, artist)]
+    delete ncmIdMap[key]
     persistNcmIdMap()
     return null
   }
   if (remembered.status === 'hit' && Date.now() - remembered.updatedAt > NCM_ID_MAP_HIT_TTL_MS) {
-    delete ncmIdMap[makeSongLookupKey(name, artist)]
+    delete ncmIdMap[key]
     persistNcmIdMap()
     return null
   }
@@ -532,8 +543,8 @@ async function ncmGetUrl(songId, name, artist) {
   const remembered = getRememberedSongId(name, artist)
   const expectedArtistParts = splitArtistNames(artist)
 
-  if (remembered?.id) candidateIds.push(String(remembered.id))
-  if (songId && String(songId) !== '0') candidateIds.push(String(songId))
+  if (isLikelyNcmSongId(remembered?.id)) candidateIds.push(String(remembered.id))
+  if (isLikelyNcmSongId(songId) && String(songId) !== '0') candidateIds.push(String(songId))
 
   for (const candidateId of candidateIds) {
     if (!candidateId || tried.has(candidateId)) continue
@@ -551,7 +562,9 @@ async function ncmGetUrl(songId, name, artist) {
     }
   }
 
-  console.log(`[ncm] id ${songId} 无效，搜索 "${name} ${artist}"`)
+  if (candidateIds.length > 0) {
+    console.log(`[ncm] id ${candidateIds[0]} 无效，搜索 "${name} ${artist}"`)
+  }
   const searchedIds = await ncmSearch(name, artist)
   for (const candidateId of searchedIds) {
     if (!candidateId || tried.has(candidateId)) continue
