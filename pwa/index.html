@@ -1538,26 +1538,30 @@
     } catch (e) {}
     audio.src = item.play_url
     audio.load()
-    audio.play().then(() => {
-      state.playing = true
-      renderControls()
-    }).catch((e) => {
-      state.playing = false
-      renderControls()
-      console.error('[claudio] 播放失败:', e.name, e.message)
-      appendDj(`播放失败，跳到下一首`)
-      setTimeout(() => advanceToNext(), 1500)
-    })
+    // 先预更新歌名，播放失败时回滚
+    const prevTrack = state.currentTrack
     state.currentTrack = item.song_info || null
     state.progress = 0
     state.heroCommentary = ''
     renderHero()
     renderQueue()
     renderProgress()
-    if (autoExplain) {
-      maybeAutoExplain(item)
-    }
-    setTimeout(prefetchNextExplain, 2000)
+    audio.play().then(() => {
+      state.playing = true
+      renderControls()
+      if (autoExplain) {
+        maybeAutoExplain(item)
+      }
+      setTimeout(prefetchNextExplain, 2000)
+    }).catch((e) => {
+      state.playing = false
+      // 播放失败：回滚歌名，静默跳下一首
+      state.currentTrack = prevTrack
+      renderHero()
+      renderControls()
+      console.error('[claudio] 播放失败:', e.name, e.message)
+      setTimeout(() => advanceToNext(), 800)
+    })
   }
 
   function cleanupVoiceDucking() {
@@ -2908,12 +2912,12 @@
     // Draw dark side first — very transparent, suggestion only
     ctx.beginPath()
     ctx.arc(moonX, moonY, moonRadius, 0, Math.PI * 2)
-    ctx.fillStyle = `rgba(18,18,28,${(0.28 * alphaScale).toFixed(4)})`
+    ctx.fillStyle = `rgba(18,18,28,${(0.72 * alphaScale).toFixed(4)})`
     ctx.fill()
 
     // Draw lit side using bezier curve terminator
     ctx.beginPath()
-    const litColor = `rgba(228,222,200,${(0.32 * alphaScale).toFixed(4)})`
+    const litColor = `rgba(228,222,200,${(0.82 * alphaScale).toFixed(4)})`
 
     if (phase <= 0.5) {
       // Waxing: lit on right
