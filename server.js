@@ -79,6 +79,7 @@ const LOW_WATER_MARK = READY_POOL_REFILL_THRESHOLD
 const READY_POOL_ROUND_SIZE = 15
 const READY_POOL_MAX_ROUNDS = 8
 const READY_POOL_PARALLEL_ROUNDS = 2
+const STARTUP_PREWARM_TIMEOUT_MS = 30 * 1000
 const ncmSearchCache = new Map()
 const SEARCH_CACHE_TTL_MS = 12 * 60 * 60 * 1000
 const SEARCH_CACHE_MISS_TTL_MS = 30 * 60 * 1000
@@ -105,6 +106,7 @@ let lastWeatherMain = null
 let weatherPollTimer = null
 const WEATHER_POLL_INTERVAL = 5 * 60 * 1000 // 5分钟
 let shouldAutoplayAfterRefill = false
+let suppressQueueBroadcasts = false
 
 const queueManager = createQueueManager({
   targetSize: READY_POOL_TARGET_SIZE,
@@ -112,6 +114,7 @@ const queueManager = createQueueManager({
   itemKey: queueKeyFromItem,
   onQueueChange(queue) {
     if (latestStationPayload) latestStationPayload = { ...latestStationPayload, queue }
+    if (suppressQueueBroadcasts) return
     scheduler.broadcast({ type: 'queue-refresh', queue })
   },
   onRefillStart({ reason, needed, sizeBefore }) {
@@ -329,6 +332,10 @@ function broadcastPlaylistReady(payload, queue = queueManager.getSnapshot()) {
     segue: payload.segue || '',
   }
   scheduler.broadcast(latestStationPayload)
+}
+
+function delay(ms) {
+  return new Promise(resolve => setTimeout(resolve, ms))
 }
 
 function dedupeQueueItems(items) {
@@ -864,6 +871,7 @@ async function buildReadyPoolMultiRound(reason, options = {}) {
   const targetSize = options.targetSize || READY_POOL_TARGET_SIZE
   const maxRounds = options.maxRounds || READY_POOL_MAX_ROUNDS
   const parallelRounds = options.parallelRounds || READY_POOL_PARALLEL_ROUNDS
+  const deadlineAt = options.maxDurationMs ? Date.now() + options.maxDurationMs : 0
   const recentPlays = state.getRecentPlays(50)
   const recentPlayQueueItems = recentPlays.map(play => ({
     song_info: {
@@ -876,6 +884,7 @@ async function buildReadyPoolMultiRound(reason, options = {}) {
   let roundsUsed = 0
 
   while (baseQueue.length + collected.length < targetSize && roundsUsed < maxRounds) {
+    if (deadlineAt && Date.now() >= deadlineAt) break
     const remainingRounds = maxRounds - roundsUsed
     const deficit = targetSize - (baseQueue.length + collected.length)
     const waveCount = Math.min(
@@ -927,13 +936,30 @@ async function bootstrapStation() {
     recentRecommendedKeys = []
     state.setPref(RECENT_RECOMMENDED_PREF, JSON.stringify([]))
     await context.fetchWeatherByCity()
-    await queueManager.ensureFilled('startup-prewarm', { force: true })
+    const prewarmQueue = await buildReadyPoolMultiRound('startup-prewarm', {
+      baseQueue: [],
+      targetSize: READY_POOL_TARGET_SIZE,
+      maxDurationMs: STARTUP_PREWARM_TIMEOUT_MS,
+    })
+    suppressQueueBroadcasts = true
+    queueManager.replace(prewarmQueue, 'startup-prewarm-ready')
     const result = await resolveDjSelection('根据当前时间为这一整池歌做一个开场介绍', {
       currentQueue: queueManager.getSnapshot(),
       includeSpeech: true,
     })
+    suppressQueueBroadcasts = false
     broadcastPlaylistReady(result, queueManager.getSnapshot())
     console.log(`[claudio] 启动预热完成，readyPool=${queueManager.size()} 首`)
+    if (queueManager.size() < READY_POOL_TARGET_SIZE) {
+      delay(0).then(async () => {
+        suppressQueueBroadcasts = true
+        try {
+          await replenishQueueSilently('startup-post-timeout')
+        } finally {
+          suppressQueueBroadcasts = false
+        }
+      })
+    }
 
     // 记录初始天气状态
     const initWeather = await context.getWeather()
@@ -944,6 +970,7 @@ async function bootstrapStation() {
     if (weatherPollTimer) clearInterval(weatherPollTimer)
     weatherPollTimer = setInterval(checkWeatherChange, WEATHER_POLL_INTERVAL)
   } catch (e) {
+    suppressQueueBroadcasts = false
     console.error('[claudio] 开机自动选曲失败:', e.message)
   }
 }
