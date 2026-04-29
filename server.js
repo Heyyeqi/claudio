@@ -49,17 +49,8 @@ wss.on('connection', ws => {
 
   if (latestStationPayload) {
     ws.send(JSON.stringify(latestStationPayload))
-    if (currentNowPlaying) {
-      ws.send(JSON.stringify({
-        type: 'now-playing',
-        song_info: currentNowPlaying,
-        play_url: null,
-        spotify_uri: null,
-        queue: queueManager.getSnapshot(),
-      }))
-    } else if (latestStationPayload.queue?.length > 0) {
-      ws.send(JSON.stringify({ type: 'now-playing', ...latestStationPayload.queue[0], queue: latestStationPayload.queue }))
-    }
+  } else if (queueManager.size() > 0) {
+    ws.send(JSON.stringify({ type: 'queue-refresh', queue: queueManager.getSnapshot() }))
   }
 
   ws.on('close', () => {
