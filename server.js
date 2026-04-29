@@ -49,7 +49,15 @@ wss.on('connection', ws => {
 
   if (latestStationPayload) {
     ws.send(JSON.stringify(latestStationPayload))
-    if (latestStationPayload.queue?.length > 0) {
+    if (currentNowPlaying) {
+      ws.send(JSON.stringify({
+        type: 'now-playing',
+        song_info: currentNowPlaying,
+        play_url: null,
+        spotify_uri: null,
+        queue: queueManager.getSnapshot(),
+      }))
+    } else if (latestStationPayload.queue?.length > 0) {
       ws.send(JSON.stringify({ type: 'now-playing', ...latestStationPayload.queue[0], queue: latestStationPayload.queue }))
     }
   }
@@ -802,7 +810,7 @@ async function buildDjResponseCore(input, options = {}) {
   if (broadcast) {
     broadcastPlaylistReady(payload, queueManager.getSnapshot())
 
-    if (payload.queue.length > 0) {
+    if (payload.queue.length > 0 && !currentNowPlaying) {
       scheduler.broadcast({ type: 'now-playing', ...payload.queue[0], queue: queueManager.getSnapshot() })
     }
   }
