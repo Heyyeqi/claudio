@@ -13,7 +13,7 @@ const {
 } = require('./search-utils')
 const CLIENT_ID = process.env.SPOTIFY_CLIENT_ID
 const CLIENT_SECRET = process.env.SPOTIFY_CLIENT_SECRET
-const REDIRECT_URI = process.env.SPOTIFY_REDIRECT_URI || 'https://web-production-a5193.up.railway.app/callback'
+const REDIRECT_URI = process.env.SPOTIFY_REDIRECT_URI || 'https://web-production-a5193.up.railway.app/auth/spotify/callback'
 const RAILWAY_GRAPHQL_ENDPOINT = 'https://backboard.railway.app/graphql/v2'
 const SPOTIFY_TOKEN_PREF = 'spotify_user_token_v1'
 const SPOTIFY_BAD_TITLE_KWS = [
