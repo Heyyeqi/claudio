@@ -561,6 +561,10 @@ async function ncmGetUrl(songId, name, artist) {
     const data = await ncmFetch(`${base}/song/url/v1?id=${candidateId}&level=standard`)
     const item = data?.data?.[0]
     if (item?.url && item.code === 200) {
+      if (item.freeTrialInfo) {
+        console.log(`[ncm] id=${candidateId} 为试听片段，跳过`)
+        continue
+      }
       if (!(await checkArtistViaDetail(candidateId, expectedArtistParts, base))) continue
       rememberSongIdMapping(name, artist, candidateId, 'hit')
       if (candidateId !== String(songId)) {
@@ -581,6 +585,10 @@ async function ncmGetUrl(songId, name, artist) {
     const data = await ncmFetch(`${base}/song/url/v1?id=${candidateId}&level=standard`)
     const item = data?.data?.[0]
     if (item?.url && item.code === 200) {
+      if (item.freeTrialInfo) {
+        console.log(`[ncm] id=${candidateId} 为试听片段，跳过`)
+        continue
+      }
       if (!(await checkArtistViaDetail(candidateId, expectedArtistParts, base))) continue
       rememberSongIdMapping(name, artist, candidateId, 'hit')
       console.log(`[ncm] 搜索命中 "${name} / ${artist}" -> ${candidateId}`)
