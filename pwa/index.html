@@ -855,7 +855,7 @@
             <svg width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.45" stroke-linecap="round" stroke-linejoin="round"><path d="M7 7L17 17"></path><path d="M17 7L7 17"></path></svg>
           </button>
           <button class="control-btn" id="btn-heart" aria-label="Like">
-            <svg width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.45" stroke-linecap="round" stroke-linejoin="round"><path d="M12 19C12 19 4 14.27 4 8.87C4 6.73 5.79 5 7.99 5C9.38 5 10.61 5.71 12 7.02C13.39 5.71 14.62 5 16.01 5C18.21 5 20 6.73 20 8.87C20 14.27 12 19 12 19Z"></path></svg>
+            <span id="shichiyou-symbol" style="font-size:16px;line-height:1;opacity:0.75">☀</span>
           </button>
         </div>
 
@@ -4060,6 +4060,13 @@
   document.getElementById('btn-next').addEventListener('click', advanceToNext)
   document.getElementById('btn-note').addEventListener('click', explainCurrentTrack)
   document.getElementById('btn-dislike').addEventListener('click', () => sendFeedback('dislike'))
+  const SHICHIYOU_SYMBOLS = ['☀', '☽', '♂', '☿', '♃', '♀', '♄']
+  function updateShichiyouBtn() {
+    const day = new Date().getDay()
+    const el = document.getElementById('shichiyou-symbol')
+    if (el) el.textContent = SHICHIYOU_SYMBOLS[day]
+  }
+  updateShichiyouBtn()
   document.getElementById('btn-heart').addEventListener('click', () => sendFeedback('like'))
   page1Footer.addEventListener('click', goToPage2)
   page2Back.addEventListener('click', goToPage1)
