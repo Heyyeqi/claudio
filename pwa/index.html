@@ -1152,6 +1152,7 @@
   let hasUnlockedAudio = false
   let pendingTuneInAutoplay = false
   let pendingTuneInSpeech = false
+  let waitingForServerTrack = false
   let stationPayload = null
   let lastPlaylistSignature = null
   let ws = null
@@ -1647,6 +1648,7 @@
     state.queue = localQueue.slice()
     renderQueue()
     playSong(first)
+    syncServerAdvance().catch(() => {})
     return true
   }
 
@@ -1898,14 +1900,10 @@
     voice.play().then(() => activateSpeaking()).catch(() => restore())
   }
 
-  async function fetchServerNext() {
+  async function syncServerAdvance() {
     const response = await fetch('/api/next')
     const data = await response.json()
-    if (data && (data.play_url || data.spotify_uri)) {
-      playSong(data)
-      return true
-    }
-    return false
+    return response.ok ? data : null
   }
 
   function requestQueuePrefetch() {
@@ -1949,8 +1947,8 @@
   async function advanceToNext() {
     hasUnlockedAudio = true
 
-    // 预取阈值：切歌后剩余 <= 2 首时，就提前向服务端请求补货
-    if (localQueue.length <= 2) {
+    // 本地队列低于 2 首时就提前让后端补货
+    if (localQueue.length < 2) {
       requestQueuePrefetch()
     }
 
@@ -1958,35 +1956,25 @@
       const next = localQueue.shift()
       state.queue = localQueue.slice()
       renderQueue()
-      if (localQueue.length <= 2) {
+      if (localQueue.length < 2) {
         requestQueuePrefetch()
       }
       playSong(next)
+      syncServerAdvance().catch(() => {})
       return
     }
 
-    // 本地队列空了，从服务端取
+    waitingForServerTrack = true
     try {
-      const ok = await fetchServerNext()
-      if (!ok) {
-        // 服务端也没有，主动触发 DJ 重新选曲
+      const data = await syncServerAdvance()
+      if (data && (data.play_url || data.spotify_uri)) {
+        waitingForServerTrack = false
+        playSong(data)
+      } else {
         appendDj('换一批了，稍等…')
-        const res = await fetch('/api/chat', {
-          method: 'POST',
-          headers: { 'Content-Type': 'application/json' },
-          body: JSON.stringify({ input: '继续播' }),
-        })
-        const data = await res.json()
-        if (data.queue && data.queue.length > 0) {
-          setLocalQueue(data.queue)
-          if (data.say) appendDj(data.say)
-          if (data.say_audio) playVoice(data.say_audio, true)
-          else advanceToNext()
-        } else {
-          appendDj('暂时没找到合适的歌，告诉我想听什么？')
-        }
       }
     } catch {
+      waitingForServerTrack = false
       appendDj('出了点问题，稍后再试。')
     }
   }
@@ -2065,6 +2053,12 @@
         const data = JSON.parse(event.data)
         let consumedTuneInSpeech = false
         if (data.type === 'now-playing' && data.song_info) {
+          if (waitingForServerTrack && (data.play_url || data.spotify_uri)) {
+            waitingForServerTrack = false
+            if (Array.isArray(data.queue)) setLocalQueue(data.queue)
+            playSong(data)
+            return
+          }
           state.currentTrack = data.song_info
           state.currentFeedback = null
           state.heroCommentary = ''
