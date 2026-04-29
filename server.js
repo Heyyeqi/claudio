@@ -16,6 +16,7 @@ const state = require('./core/state')
 const scheduler = require('./core/scheduler')
 const { getAstronomyContext } = require('./core/astronomy')
 const spotify = require('./core/spotify')
+const { createQueueManager } = require('./core/queue-manager')
 
 const explainClient = new OpenAI({
   apiKey: process.env.DASHSCOPE_API_KEY,
@@ -61,13 +62,12 @@ wss.on('connection', ws => {
 scheduler.setWsClients(wsClients)
 
 // ── 内存播放队列 ──────────────────────────────
-// 每项：{ song_info: {id, name, artist}, play_url }
-let playQueue = []
-let isReplenishingQueue = false
 let currentNowPlaying = null
 const MIN_BATCH_SIZE = 8
 const MAX_BATCH_SIZE = 12
-const LOW_WATER_MARK = 5
+const READY_POOL_TARGET_SIZE = 12
+const READY_POOL_REFILL_THRESHOLD = 4
+const LOW_WATER_MARK = READY_POOL_REFILL_THRESHOLD
 const ncmSearchCache = new Map()
 const SEARCH_CACHE_TTL_MS = 12 * 60 * 60 * 1000
 const SEARCH_CACHE_MISS_TTL_MS = 30 * 60 * 1000
@@ -93,10 +93,30 @@ let recentRecommendedKeys = loadRecentRecommendedKeys()
 let lastWeatherMain = null
 let weatherPollTimer = null
 const WEATHER_POLL_INTERVAL = 5 * 60 * 1000 // 5分钟
+let shouldAutoplayAfterRefill = false
 
-function queuePop() {
-  return playQueue.shift() || null
-}
+const queueManager = createQueueManager({
+  targetSize: READY_POOL_TARGET_SIZE,
+  refillThreshold: READY_POOL_REFILL_THRESHOLD,
+  itemKey: queueKeyFromItem,
+  onQueueChange(queue) {
+    if (latestStationPayload) latestStationPayload = { ...latestStationPayload, queue }
+    scheduler.broadcast({ type: 'queue-refresh', queue })
+  },
+  onRefillStart({ reason, needed, sizeBefore }) {
+    console.log(`[queue] 开始补货(${reason})，缺口 ${needed}，当前 ${sizeBefore} 首`)
+  },
+  onRefillComplete({ reason, sizeBefore, sizeAfter, insertedCount }) {
+    console.log(`[queue] 补货完成(${reason})，新增 ${insertedCount} 首，当前 ${sizeAfter} 首`)
+    if (shouldAutoplayAfterRefill && sizeBefore === 0 && sizeAfter > 0) {
+      shouldAutoplayAfterRefill = false
+      scheduler.broadcast({ type: 'queue-ready', queue: queueManager.getSnapshot() })
+    }
+  },
+  onRefillError(error, { reason }) {
+    console.error(`[queue] 补货失败(${reason}):`, error.message)
+  },
+})
 
 function makeSongLookupKey(name, artist) {
   return `${normalizeNcmText(name)}::${normalizeNcmText(artist)}`
@@ -652,18 +672,12 @@ async function resolveQueue(songs) {
   return spotifyQueue.filter(Boolean)
 }
 
-async function buildDjResponseCore(input, options = {}) {
+async function resolveDjSelection(input, options = {}) {
   const {
-    persistMessages = true,
-    broadcast = false,
-    currentQueue = playQueue,
-    appendQueue = false,
+    currentQueue = queueManager.getSnapshot(),
     includeSpeech = true,
     emotionSignal = null,
-    skipIfOutdated = false,
-    buildLabel = 'build',
   } = options
-  const buildVersionAtStart = stationBuildVersion
 
   const intent = router.route(input)
   if (intent === 'system') {
@@ -698,7 +712,6 @@ async function buildDjResponseCore(input, options = {}) {
 
     queue = queue.slice(0, MAX_BATCH_SIZE)
     queue = markBatchEdges(queue)
-
   }
 
   const say_audio = includeSpeech && result.say
@@ -707,58 +720,6 @@ async function buildDjResponseCore(input, options = {}) {
         return null
       })
     : null
-
-  if (skipIfOutdated && stationBuildVersion !== buildVersionAtStart) {
-    console.log(`[claudio] ${buildLabel} 结果已过期，跳过写入`)
-    return {
-      say: includeSpeech ? result.say : null,
-      say_audio,
-      queue,
-      reason: result.reason,
-      segue: result.segue,
-      intent,
-      skippedApply: true,
-    }
-  }
-
-  stationBuildVersion += 1
-  playQueue = appendQueue
-    ? dedupeQueueItems([...(currentQueue || []), ...queue])
-    : [...queue]
-
-  if (queue.length > 0) {
-    scheduler.incrementCount()
-  }
-
-  if (queue.length > 0) {
-    rememberRecentRecommendedQueue(queue)
-  }
-
-  if (persistMessages) {
-    state.addMessage('user', input)
-    state.addMessage('assistant', JSON.stringify(result))
-  }
-
-  if (broadcast) {
-    latestStationPayload = {
-      type: 'playlist-ready',
-      say: result.say,
-      say_audio,
-      queue,
-      reason: result.reason,
-      segue: result.segue,
-    }
-
-    scheduler.broadcast(latestStationPayload)
-
-    if (queue.length > 0) {
-      scheduler.broadcast({ type: 'now-playing', ...queue[0], queue })
-    }
-  }
-
-  if (includeSpeech && playQueue.length > 0 && playQueue.length < LOW_WATER_MARK) {
-    replenishQueueSilently('post-build').catch(() => {})
-  }
 
   return {
     say: includeSpeech ? result.say : null,
@@ -770,6 +731,76 @@ async function buildDjResponseCore(input, options = {}) {
   }
 }
 
+async function buildDjResponseCore(input, options = {}) {
+  const {
+    persistMessages = true,
+    broadcast = false,
+    currentQueue = queueManager.getSnapshot(),
+    appendQueue = false,
+    includeSpeech = true,
+    emotionSignal = null,
+    skipIfOutdated = false,
+    buildLabel = 'build',
+  } = options
+  const buildVersionAtStart = stationBuildVersion
+
+  const payload = await resolveDjSelection(input, {
+    currentQueue,
+    includeSpeech,
+    emotionSignal,
+  })
+
+  if (skipIfOutdated && stationBuildVersion !== buildVersionAtStart) {
+    console.log(`[claudio] ${buildLabel} 结果已过期，跳过写入`)
+    return {
+      ...payload,
+      skippedApply: true,
+    }
+  }
+
+  stationBuildVersion += 1
+  const nextQueue = appendQueue
+    ? dedupeQueueItems([...(currentQueue || []), ...(payload.queue || [])])
+    : [...(payload.queue || [])]
+  queueManager.replace(nextQueue, appendQueue ? 'append-build' : 'replace-build')
+
+  if (payload.queue.length > 0) {
+    scheduler.incrementCount()
+  }
+
+  if (payload.queue.length > 0) {
+    rememberRecentRecommendedQueue(payload.queue)
+  }
+
+  if (persistMessages) {
+    state.addMessage('user', input)
+    state.addMessage('assistant', JSON.stringify(payload))
+  }
+
+  if (broadcast) {
+    latestStationPayload = {
+      type: 'playlist-ready',
+      say: payload.say,
+      say_audio: payload.say_audio,
+      queue: queueManager.getSnapshot(),
+      reason: payload.reason,
+      segue: payload.segue,
+    }
+
+    scheduler.broadcast(latestStationPayload)
+
+    if (payload.queue.length > 0) {
+      scheduler.broadcast({ type: 'now-playing', ...payload.queue[0], queue: queueManager.getSnapshot() })
+    }
+  }
+
+  if (includeSpeech && queueManager.size() > 0 && queueManager.size() < LOW_WATER_MARK) {
+    replenishQueueSilently('post-build').catch(() => {})
+  }
+
+  return payload
+}
+
 async function buildDjResponse(input, options = {}) {
   const task = () => buildDjResponseCore(input, options)
   if (options.serialize === false) return task()
@@ -777,30 +808,27 @@ async function buildDjResponse(input, options = {}) {
 }
 
 async function replenishQueueSilently(trigger = 'auto') {
-  if (isReplenishingQueue || playQueue.length >= LOW_WATER_MARK) return
-  isReplenishingQueue = true
-
   try {
-    const result = await buildDjResponse('根据当前时间继续补充几首适合接着听的歌', {
-      persistMessages: false,
-      broadcast: false,
-      currentQueue: playQueue,
-      appendQueue: true,
-      includeSpeech: false,
-    })
-
-    if (result.queue.length > 0) {
-      console.log(`[queue] 静默补货完成(${trigger})，新增 ${result.queue.length} 首，当前 ${playQueue.length} 首`)
-      scheduler.broadcast({ type: 'queue-refresh', queue: playQueue })
-    } else {
-      console.log(`[queue] 静默补货未新增歌曲(${trigger})`)
-    }
+    await queueManager.ensureFilled(trigger)
   } catch (e) {
     console.error(`[queue] 静默补货失败(${trigger}):`, e.message)
-  } finally {
-    isReplenishingQueue = false
   }
 }
+
+async function buildReadyPoolBatch(input, options = {}) {
+  const result = await resolveDjSelection(input, {
+    currentQueue: queueManager.getSnapshot(),
+    includeSpeech: false,
+    ...options,
+  })
+  return result.queue || []
+}
+
+queueManager.setRefillHandler(async ({ reason }) => {
+  return buildReadyPoolBatch('根据当前时间继续补充几首适合接着听的歌', {
+    buildLabel: `refill:${reason}`,
+  })
+})
 
 async function bootstrapStation() {
   try {
@@ -816,6 +844,7 @@ async function bootstrapStation() {
       buildLabel: 'bootstrap',
     })
     console.log(`[claudio] 开机自动选曲完成，生成 ${result.queue.length} 首`)
+    replenishQueueSilently('bootstrap').catch(() => {})
 
     // 记录初始天气状态
     const initWeather = await context.getWeather()
@@ -1005,8 +1034,7 @@ app.post('/api/feedback', (req, res) => {
   state.setSongFeedback(song, action)
 
   if (action === 'dislike') {
-    playQueue = playQueue.filter(item => queueKeyFromItem(item) !== `${name}::${artist}`.toLowerCase())
-    scheduler.broadcast({ type: 'queue-refresh', queue: playQueue })
+    queueManager.remove(item => queueKeyFromItem(item) === `${name}::${artist}`.toLowerCase(), 'dislike-remove')
   }
 
   return res.json({ ok: true, feedback: action })
@@ -1074,18 +1102,19 @@ app.get('/api/next', async (req, res) => {
   const isPeek = String(req.query?.peek || '') === '1' || String(req.query?.peek || '').toLowerCase() === 'true'
 
   if (isPeek) {
-    if (playQueue.length < LOW_WATER_MARK) {
+    if (queueManager.size() < LOW_WATER_MARK) {
       replenishQueueSilently('peek').catch(() => {})
     }
-    const peekItem = playQueue[0] || null
+    const peekItem = queueManager.peek() || null
     if (peekItem) return res.json(peekItem)
     return res.json({ song_info: null, play_url: null, spotify_uri: null })
   }
 
-  let item = queuePop()
+  let item = queueManager.pop('api-next')
   if (!item) {
+    shouldAutoplayAfterRefill = true
     await replenishQueueSilently('empty-next')
-    item = queuePop()
+    item = queueManager.pop('api-next-refill')
   }
 
   if (item) {
@@ -1096,7 +1125,7 @@ app.get('/api/next', async (req, res) => {
       artist: item.song_info?.artist,
     })
     scheduler.broadcast({ type: 'now-playing', ...item })
-    if (playQueue.length < LOW_WATER_MARK) {
+    if (queueManager.size() < LOW_WATER_MARK) {
       replenishQueueSilently('next').catch(() => {})
     }
     res.json(item)
@@ -1107,7 +1136,7 @@ app.get('/api/next', async (req, res) => {
 
 // GET /api/queue — 查看当前队列
 app.get('/api/queue', (req, res) => {
-  res.json({ queue: playQueue })
+  res.json({ queue: queueManager.getSnapshot() })
 })
 
 // GET /api/now
@@ -1121,7 +1150,7 @@ app.get('/api/now', async (req, res) => {
         return null
       })
     : null
-  const fallbackTrack = playQueue[0]?.song_info || null
+  const fallbackTrack = queueManager.peek()?.song_info || null
   const activeTrack = currentNowPlaying || fallbackTrack || null
   const feedback = activeTrack ? state.getSongFeedback(activeTrack) : null
   res.json({
