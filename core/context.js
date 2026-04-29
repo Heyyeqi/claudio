@@ -118,6 +118,14 @@ function getLunarLabel(date = new Date()) {
   return parts.join('，')
 }
 
+const SHICHIYOU = ['日曜日 · 太阳', '月曜日 · 月亮', '火曜日 · 火', '水曜日 · 水', '木曜日 · 木', '金曜日 · 金', '土曜日 · 土']
+const SHICHIYOU_MOOD = ['明亮开阔，适合向外的能量', '内敛阴柔，情绪细腻', '带有张力，能量向上', '流动变化，思绪游走', '厚重沉稳，自然质感', '精致都市，有光泽感', '沉稳落地，回归感']
+
+function getShichiyou(date = new Date()) {
+  const day = new Date(date.toLocaleString('en-US', { timeZone: 'Asia/Shanghai' })).getDay()
+  return { label: SHICHIYOU[day], mood: SHICHIYOU_MOOD[day] }
+}
+
 function formatClock(timestampSeconds) {
   if (!timestampSeconds) return null
   return new Date(timestampSeconds * 1000).toLocaleTimeString('zh-CN', {
@@ -397,13 +405,14 @@ async function getEnvironmentSnapshot() {
       ].filter(Boolean).join('\n')
     : ''
 
+  const shichiyou = getShichiyou(now)
   return {
     timeStr,
     weather,
     lunar,
     astronomy,
     inferredEmotions,
-    envText: `当前时间：${timeStr}\n天气：${weather.text}\n农历：${lunar}\n日出：${sunriseText}\n日落：${sunsetText}${astronomyText ? `\n${astronomyText}` : ''}`,
+    envText: `当前时间：${timeStr}\n今日曜日：${shichiyou.label}（${shichiyou.mood}）\n天气：${weather.text}\n农历：${lunar}\n日出：${sunriseText}\n日落：${sunsetText}${astronomyText ? `\n${astronomyText}` : ''}`,
   }
 }
 
@@ -498,7 +507,7 @@ async function buildContext(userInput, options = {}) {
     '你必须且只能输出一个合法 JSON 对象，不含任何 markdown 包裹，格式如下：',
     '---',
     '你必须且只能输出一个合法 JSON 对象，不含任何 markdown 包裹，格式如下：',
-    '{"say":"播报文案，一次介绍这批歌的整体氛围（将被转为语音，100字以内）","play":[{"id":"0","name":"歌名","artist":"艺人全名","name_en":"英文歌名；如无则空字符串","artist_en":"英文艺人名；如无则空字符串","name_tw":"繁体歌名；仅当与简体不同才填写，否则空字符串"}],"replace_pool":false,"reason":"内部选曲逻辑说明（不播报）","segue":"播完最后一首后衔接下一批的话"}',
+    '{"say":"播报文案，将被转为语音，100字以内。风格要有变化，不要每次都是同一句式。可以是一句带画面感的描述、一个问句、一个场景、今日曜日的质感、一首歌触发的联想——总之让人想听下去，而不是在报歌单。","play":[{"id":"0","name":"歌名","artist":"艺人全名","name_en":"英文歌名；如无则空字符串","artist_en":"英文艺人名；如无则空字符串","name_tw":"繁体歌名；仅当与简体不同才填写，否则空字符串"}],"replace_pool":false,"reason":"内部选曲逻辑说明（不播报）","segue":"播完最后一首后衔接下一批的话"}',
     '【选曲规则】① play 数组默认输出 8-12 首；如果当前请求明确要求 15 首，则必须输出 15 首 ② 歌曲自由生成，不受曲库限制，但必须是真实存在的歌曲——name 和 artist 必须准确，没有把握时宁可少推，不要编造 ③ 每首歌额外尽量补全 name_en、artist_en、name_tw；没有把握时返回空字符串，不要编造 ④ 禁止推荐"用户明确不喜欢的歌"、"近期已播放"或"当前队列中已有的歌"里的任何一首 ⑤ 如果用户点过喜欢，优先延续这些歌或这些艺人的气质、编曲、情绪线索，但不要机械重复同一首 ⑥ 推荐比例保持已知艺人 4 : 未知艺人 6，主动发现 RW 尚未听过但品味完全吻合的作品 ⑦ 如果用户只是闲聊不涉及音乐，play 数组可为空 ⑧ artist 字段必须填写原唱艺人全名，禁止填写翻唱歌手、配乐版、钢琴版、纯音乐版等非原唱版本的艺人名 ⑨ replace_pool 是布尔值：只有当用户明确要求完全换一种风格、情绪或方向，导致当前池子整体都不该继续时，才返回 true；普通的补充、微调、延续、陪聊后一两句点歌都返回 false',
     '请根据以上天文与文化背景，结合时段和天气，选择在此刻听来最自然、最贴切的音乐。不要只考虑时段标签，要考虑今天这一天的具体质感。清明前后选曲应有感伤或宁静；梅雨季选曲应有绵长或慵懒；满月深夜选曲可以更空灵；节气当天可以选有仪式感的音乐。',
   ].join('\n')
