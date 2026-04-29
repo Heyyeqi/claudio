@@ -203,15 +203,28 @@ function buildLooseTitleQueries(song) {
   return buildTitleVariants(song).slice(0, 6)
 }
 
-async function runSpotifySearch(query) {
+async function runSpotifySearch(query, retries = 2) {
   const token = await getClientCredToken()
   const q = encodeURIComponent(query)
-  const res = await fetchJsonWithTimeout(
-    `https://api.spotify.com/v1/search?q=${q}&type=track&limit=5&market=TW`,
-    { headers: { Authorization: `Bearer ${token}` } }
-  )
-  const data = await res.json()
-  return data?.tracks?.items || []
+  for (let attempt = 0; attempt <= retries; attempt++) {
+    const res = await fetchJsonWithTimeout(
+      `https://api.spotify.com/v1/search?q=${q}&type=track&limit=5&market=TW`,
+      { headers: { Authorization: `Bearer ${token}` } }
+    )
+    if (res.status === 429) {
+      const retryAfter = parseInt(res.headers.get('retry-after') || '1', 10)
+      const wait = (retryAfter * 1000) || (1000 * Math.pow(2, attempt))
+      console.warn(`[spotify] 429 限流，等待 ${wait}ms 后重试 (${attempt + 1}/${retries})`)
+      if (attempt < retries) {
+        await new Promise(r => setTimeout(r, wait))
+        continue
+      }
+      return []
+    }
+    const data = await res.json()
+    return data?.tracks?.items || []
+  }
+  return []
 }
 
 function scoreSpotifyTrack(track, song, options = {}) {
