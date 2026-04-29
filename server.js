@@ -110,7 +110,16 @@ const queueManager = createQueueManager({
     console.log(`[queue] 补货完成(${reason})，新增 ${insertedCount} 首，当前 ${sizeAfter} 首`)
     if (shouldAutoplayAfterRefill && sizeBefore === 0 && sizeAfter > 0) {
       shouldAutoplayAfterRefill = false
-      scheduler.broadcast({ type: 'queue-ready', queue: queueManager.getSnapshot() })
+      const item = queueManager.pop('auto-resume')
+      if (item) {
+        currentNowPlaying = item.song_info || null
+        state.addPlay({
+          id: item.song_info?.id,
+          name: item.song_info?.name,
+          artist: item.song_info?.artist,
+        })
+        scheduler.broadcast({ type: 'now-playing', ...item, queue: queueManager.getSnapshot() })
+      }
     }
   },
   onRefillError(error, { reason }) {
@@ -297,6 +306,18 @@ function makeSongPayload(song) {
     name: song?.name || '',
     artist: song?.artist || '',
   }
+}
+
+function broadcastPlaylistReady(payload, queue = queueManager.getSnapshot()) {
+  latestStationPayload = {
+    type: 'playlist-ready',
+    say: payload.say || null,
+    say_audio: payload.say_audio || null,
+    queue,
+    reason: payload.reason || '',
+    segue: payload.segue || '',
+  }
+  scheduler.broadcast(latestStationPayload)
 }
 
 function dedupeQueueItems(items) {
@@ -725,6 +746,7 @@ async function resolveDjSelection(input, options = {}) {
     say: includeSpeech ? result.say : null,
     say_audio,
     queue,
+    replace_pool: !!result.replace_pool,
     reason: result.reason,
     segue: result.segue,
     intent,
@@ -778,16 +800,7 @@ async function buildDjResponseCore(input, options = {}) {
   }
 
   if (broadcast) {
-    latestStationPayload = {
-      type: 'playlist-ready',
-      say: payload.say,
-      say_audio: payload.say_audio,
-      queue: queueManager.getSnapshot(),
-      reason: payload.reason,
-      segue: payload.segue,
-    }
-
-    scheduler.broadcast(latestStationPayload)
+    broadcastPlaylistReady(payload, queueManager.getSnapshot())
 
     if (payload.queue.length > 0) {
       scheduler.broadcast({ type: 'now-playing', ...payload.queue[0], queue: queueManager.getSnapshot() })
@@ -942,8 +955,28 @@ app.post('/api/chat', async (req, res) => {
 
   try {
     const emotionSignal = extractEmotionFromInput(input)
-    const payload = await buildDjResponse(input, { persistMessages: true, broadcast: true, emotionSignal })
-    return res.json(payload)
+    const payload = await resolveDjSelection(input, {
+      currentQueue: queueManager.getSnapshot(),
+      includeSpeech: true,
+      emotionSignal,
+    })
+
+    state.addMessage('user', input)
+    state.addMessage('assistant', JSON.stringify(payload))
+
+    if (payload.queue.length > 0) {
+      if (payload.replace_pool) {
+        queueManager.replace(payload.queue, 'chat-replace-pool')
+      } else {
+        queueManager.prepend(payload.queue, 'chat-prepend-pool')
+      }
+      rememberRecentRecommendedQueue(payload.queue)
+      scheduler.incrementCount()
+    }
+
+    const queue = queueManager.getSnapshot()
+    broadcastPlaylistReady(payload, queue)
+    return res.json({ ...payload, queue })
   } catch (e) {
     console.error('[/api/chat]', e)
     return res.status(500).json({ error: e.message })
@@ -1113,10 +1146,11 @@ app.get('/api/next', async (req, res) => {
   let item = queueManager.pop('api-next')
   if (!item) {
     shouldAutoplayAfterRefill = true
-    await replenishQueueSilently('empty-next')
-    item = queueManager.pop('api-next-refill')
+    replenishQueueSilently('empty-next').catch(() => {})
+    return res.json({ song_info: null, play_url: null, spotify_uri: null, message: '稍等' })
   }
 
+  shouldAutoplayAfterRefill = false
   if (item) {
     currentNowPlaying = item.song_info || null
     state.addPlay({
@@ -1124,7 +1158,7 @@ app.get('/api/next', async (req, res) => {
       name: item.song_info?.name,
       artist: item.song_info?.artist,
     })
-    scheduler.broadcast({ type: 'now-playing', ...item })
+    scheduler.broadcast({ type: 'now-playing', ...item, queue: queueManager.getSnapshot() })
     if (queueManager.size() < LOW_WATER_MARK) {
       replenishQueueSilently('next').catch(() => {})
     }

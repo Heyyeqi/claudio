@@ -44,7 +44,7 @@ async function askClaude(context) {
         // ignore
       }
     }
-    return { say: raw, play: [], reason: 'JSON 解析失败', segue: '' }
+    return { say: raw, play: [], replace_pool: false, reason: 'JSON 解析失败', segue: '' }
   }
 }
 
