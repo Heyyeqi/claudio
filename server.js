@@ -620,7 +620,8 @@ async function resolveQueue(songs) {
             }
             return
           }
-          return
+          // Spotify 搜不到，fallback 到 NCM 取直链
+          console.log(`[spotify] 未命中 "${song.name} / ${song.artist}"，降级到 NCM`)
         }
         const { url, id: realId } = await ncmGetUrl(song.id, song.name, song.artist)
         if (!url) return
