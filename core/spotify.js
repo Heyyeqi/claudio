@@ -1,5 +1,16 @@
 // ── Spotify 模块 ─────────────────────────────────────────────────
 const state = require('./state')
+const {
+  artistMatchScore,
+  buildArtistVariants,
+  buildTitleVariants,
+  makeSongSearchProfile,
+  normalizeBaseText,
+  normalizeCompareText,
+  normalizeSongKey,
+  stripTitleNoise,
+  titleMatchScore,
+} = require('./search-utils')
 const CLIENT_ID = process.env.SPOTIFY_CLIENT_ID
 const CLIENT_SECRET = process.env.SPOTIFY_CLIENT_SECRET
 const REDIRECT_URI = process.env.SPOTIFY_REDIRECT_URI || 'https://web-production-a5193.up.railway.app/callback'
@@ -166,21 +177,60 @@ async function initializeUserToken() {
 }
 
 function normalizeSpotifyText(text) {
-  return String(text || '')
-    .normalize('NFKD')
-    .replace(/[\u0300-\u036f]/g, '')
-    .toLowerCase()
-    .replace(/[’'".,!?()[\]{}]/g, ' ')
-    .replace(/\s+/g, ' ')
-    .trim()
+  return normalizeCompareText(text, { preserveSpaces: true })
 }
 
 function normalizeSpotifyTitle(text) {
-  return normalizeSpotifyText(text)
-    .replace(/\b(feat|ft|with|and)\b.*$/g, '')
-    .replace(/\b(live|remix|acoustic|instrumental|cover|tribute|karaoke|piano|version|ver\.|edit|mono|demo)\b/g, ' ')
-    .replace(/\s+/g, ' ')
-    .trim()
+  return normalizeSongKey(stripTitleNoise(text))
+}
+
+function buildStructuredQueries(song) {
+  const titles = buildTitleVariants(song)
+  const artists = buildArtistVariants(song)
+  const queries = []
+
+  for (const title of titles.slice(0, 4)) {
+    for (const artist of artists.slice(0, 4)) {
+      queries.push(`track:"${title}" artist:"${artist}"`)
+      if (queries.length >= 8) return queries
+    }
+  }
+
+  return queries
+}
+
+function buildLooseTitleQueries(song) {
+  return buildTitleVariants(song).slice(0, 6)
+}
+
+async function runSpotifySearch(query) {
+  const token = await getClientCredToken()
+  const q = encodeURIComponent(query)
+  const res = await fetchJsonWithTimeout(
+    `https://api.spotify.com/v1/search?q=${q}&type=track&limit=5&market=TW`,
+    { headers: { Authorization: `Bearer ${token}` } }
+  )
+  const data = await res.json()
+  return data?.tracks?.items || []
+}
+
+function scoreSpotifyTrack(track, song, options = {}) {
+  const titleScore = titleMatchScore(buildTitleVariants(song), track?.name)
+  if (titleScore < 72) return null
+
+  const hasBadTitle = SPOTIFY_BAD_TITLE_KWS.some(kw => normalizeSpotifyText(track?.name).includes(kw))
+  if (hasBadTitle && titleScore < 100) return null
+
+  const artists = (track?.artists || []).map(a => normalizeBaseText(a.name)).filter(Boolean)
+  const artistScore = artistMatchScore(buildArtistVariants(song), artists)
+  if (artistScore === 0 && !(options.allowExactTitleWithoutArtist && titleScore === 100)) {
+    return null
+  }
+
+  return {
+    track,
+    score: titleScore * 2 + artistScore - (hasBadTitle ? 24 : 0),
+  }
 }
 
 // ── Client Credentials Token（搜索用）───────────────────────────
@@ -287,50 +337,50 @@ function hasUserToken() {
 }
 
 // ── 搜索曲目，返回 Spotify Track ID ─────────────────────────────
-async function searchTrack(name, artist) {
-  const token = await getClientCredToken()
-  const q = encodeURIComponent(`track:${name} artist:${artist}`)
-  const res = await fetchJsonWithTimeout(
-    `https://api.spotify.com/v1/search?q=${q}&type=track&limit=3&market=TW`,
-    { headers: { Authorization: `Bearer ${token}` } }
-  )
-  const data = await res.json()
-  const tracks = data?.tracks?.items || []
-  if (!tracks.length) return null
-  const expectedArtist = normalizeSpotifyText(artist)
-  const expectedTitle = normalizeSpotifyTitle(name)
-  const allowedTitles = expectedTitle ? [expectedTitle] : []
+async function searchTrack(songOrName, artist) {
+  const song = makeSongSearchProfile(songOrName, artist)
 
-  const scored = tracks
-    .map(track => {
-      const title = normalizeSpotifyTitle(track.name)
-      const artists = (track.artists || []).map(a => normalizeSpotifyText(a.name)).filter(Boolean)
-      const hasBadTitle = SPOTIFY_BAD_TITLE_KWS.some(kw => normalizeSpotifyText(track.name).includes(kw))
-      if (!title || hasBadTitle) return null
+  for (const query of buildStructuredQueries(song)) {
+    const tracks = await runSpotifySearch(query)
+    if (!tracks.length) continue
 
-      const exactTitle = title === expectedTitle
-      const titleMatch = exactTitle || (expectedTitle && (title.includes(expectedTitle) || expectedTitle.includes(title)))
-      if (!titleMatch && allowedTitles.length) return null
+    const best = tracks
+      .map(track => scoreSpotifyTrack(track, song, { allowExactTitleWithoutArtist: true }))
+      .filter(Boolean)
+      .sort((a, b) => b.score - a.score)[0]
 
-      const artistExact = artists.includes(expectedArtist)
-      const artistMatch = artistExact || artists.some(a => a.includes(expectedArtist) || expectedArtist.includes(a))
-      if (!artistMatch) return null
-
-      const score = (exactTitle ? 3 : 0) + (artistExact ? 2 : 0)
-      return { track, score }
-    })
-    .filter(Boolean)
-    .sort((a, b) => b.score - a.score)
-
-  const track = scored[0]?.track || null
-  if (!track) return null
-  return {
-    uri: track.uri || null,
-    id: track.id || null,
-    name: track.name || name,
-    artists: (track.artists || []).map(a => a.name).filter(Boolean),
-    album: track.album?.name || null,
+    if (best?.track) {
+      return {
+        uri: best.track.uri || null,
+        id: best.track.id || null,
+        name: best.track.name || song.name,
+        artists: (best.track.artists || []).map(a => a.name).filter(Boolean),
+        album: best.track.album?.name || null,
+      }
+    }
   }
+
+  for (const query of buildLooseTitleQueries(song)) {
+    const tracks = await runSpotifySearch(query)
+    if (!tracks.length) continue
+
+    const best = tracks
+      .map(track => scoreSpotifyTrack(track, song, { allowExactTitleWithoutArtist: true }))
+      .filter(Boolean)
+      .sort((a, b) => b.score - a.score)[0]
+
+    if (best?.track) {
+      return {
+        uri: best.track.uri || null,
+        id: best.track.id || null,
+        name: best.track.name || song.name,
+        artists: (best.track.artists || []).map(a => a.name).filter(Boolean),
+        album: best.track.album?.name || null,
+      }
+    }
+  }
+
+  return null
 }
 
 // ── 批量搜索，返回 { name, artist, uri } 列表 ───────────────────
@@ -338,7 +388,7 @@ async function resolveSpotifyUris(songs) {
   const results = await Promise.all(
     songs.map(async song => {
       try {
-        const match = await searchTrack(song.name, song.artist)
+        const match = await searchTrack(song)
         if (!match?.uri) return null
         return {
           song_info: {
