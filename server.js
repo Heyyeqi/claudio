@@ -609,7 +609,12 @@ async function resolveQueue(songs) {
     songs.map(async (song, index) => {
       try {
         if (useSpotify) {
-          const match = await spotify.searchTrack(song.name, song.artist)
+          let match = null
+          try {
+            match = await spotify.searchTrack(song.name, song.artist)
+          } catch (e) {
+            console.error(`[spotify] 搜索失败 "${song.name} / ${song.artist}"，回退 NCM:`, e.message)
+          }
           if (match?.uri) {
             const actualArtists = Array.isArray(match.artists) ? match.artists.filter(Boolean).join('; ') : song.artist
             console.log(`[spotify] 命中 "${song.name} / ${song.artist}" -> ${match.uri}`)
@@ -628,12 +633,16 @@ async function resolveQueue(songs) {
             }
             return
           }
-          // Spotify 搜不到，fallback 到 NCM 取直链
-          console.log(`[spotify] 未命中 "${song.name} / ${song.artist}"，降级到 NCM`)
+          console.log(`[spotify] 未命中 "${song.name} / ${song.artist}"，回退 NCM`)
         }
         const { url, id: realId } = await ncmGetUrl(song.id, song.name, song.artist)
         if (!url) return
-        spotifyQueue[index] = { song_info: { ...song, id: realId || song.id }, play_url: url, source: 'ncm' }
+        spotifyQueue[index] = {
+          song_info: { ...song, id: realId || song.id },
+          requested_song_info: { ...song },
+          play_url: url,
+          source: 'ncm',
+        }
       } catch (e) {
         console.error(`[queue] 解析 "${song.name}" 失败:`, e.message)
       }
