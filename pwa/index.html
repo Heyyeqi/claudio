@@ -2263,9 +2263,8 @@
     hasUnlockedAudio = true
     state.showStartOverlay = false
     renderOverlay()
-    ensurePrimaryPlayback()
     if (stationPayload && stationPayload.say_audio) {
-      setTimeout(() => playVoice(stationPayload.say_audio, true), audio.src ? 180 : 260)
+      playVoice(stationPayload.say_audio, true, () => ensurePrimaryPlayback())
       return
     }
     ensurePrimaryPlayback()
