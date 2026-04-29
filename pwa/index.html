@@ -1580,10 +1580,11 @@
       heroTitle.style.lineHeight = '1.1'
     }
     heroArtist.textContent = state.currentTrack && state.currentTrack.artist ? state.currentTrack.artist : 'RodiO FM'
-    const cityLine = state.weather && state.weather.cityLine
-    const areaLine = state.weather && (state.weather.areaLine || '')
+    const cityLine = (state.weather && (state.weather.city || state.weather.cityLine)) || ''
+    const areaLine = (state.weather && (state.weather.locationName || state.weather.areaLine || '')) || ''
+    const showArea = areaLine && areaLine !== cityLine
     heroCity.innerHTML = cityLine
-      ? `<span class="hero-city-line primary">${escapeHtml(String(cityLine))}</span>${areaLine ? `<span class="hero-city-line secondary">${escapeHtml(String(areaLine))}</span>` : ''}`
+      ? `<span class="hero-city-line primary">${escapeHtml(String(cityLine))}</span>${showArea ? `<span class="hero-city-line secondary">${escapeHtml(String(areaLine))}</span>` : ''}`
       : ''
     heroCommentary.textContent = state.heroCommentary || ''
     heroCommentary.classList.toggle('visible', Boolean(state.heroCommentary))
@@ -3463,8 +3464,8 @@
 
     // Position: upper area, waxing leans right, waning leans left
     const isWaxing = phase < 0.5
-    const moonX = width * (isWaxing ? 0.70 : 0.30)
-    const moonY = height * (0.52 - 0.38 * clamp(altitude / 80, 0, 1))
+    const moonX = width * (isWaxing ? 0.78 : 0.22)
+    const moonY = height * (0.38 - 0.22 * clamp(altitude / 80, 0, 1))
     const moonRadius = width * 0.028
 
     // Glow — soft, large, very low alpha
