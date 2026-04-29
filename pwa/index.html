@@ -1934,6 +1934,7 @@
       const ok = await fetchServerNext()
       if (!ok) {
         // 服务端也没有，主动触发 DJ 重新选曲
+        appendDj('换一批了，稍等…')
         const res = await fetch('/api/chat', {
           method: 'POST',
           headers: { 'Content-Type': 'application/json' },
@@ -1945,9 +1946,13 @@
           if (data.say) appendDj(data.say)
           if (data.say_audio) playVoice(data.say_audio, true)
           else advanceToNext()
+        } else {
+          appendDj('暂时没找到合适的歌，告诉我想听什么？')
         }
       }
-    } catch {}
+    } catch {
+      appendDj('出了点问题，稍后再试。')
+    }
   }
 
   function playPrevious() {
