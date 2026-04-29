@@ -17,6 +17,16 @@ const scheduler = require('./core/scheduler')
 const { getAstronomyContext } = require('./core/astronomy')
 const spotify = require('./core/spotify')
 const { createQueueManager } = require('./core/queue-manager')
+const {
+  artistMatchScore,
+  buildArtistVariants,
+  buildTitleVariants,
+  makeSongSearchProfile,
+  normalizeArtistKey,
+  normalizeSongKey,
+  stripTitleNoise,
+  titleMatchScore,
+} = require('./core/search-utils')
 
 const explainClient = new OpenAI({
   apiKey: process.env.DASHSCOPE_API_KEY,
@@ -449,51 +459,26 @@ async function ncmFetch(url) {
 }
 
 function normalizeNcmText(text) {
-  return String(text || '')
-    .toLowerCase()
-    .replace(/（.*?）|\(.*?\)|\[.*?\]|【.*?】/g, ' ')
-    .replace(/feat\.?|ft\.?|with|live|version|ver\.?/gi, ' ')
-    .replace(/[·•・,，'’":：/\\|!！?？\-.]/g, ' ')
-    .replace(/\s+/g, '')
-    .trim()
+  return normalizeSongKey(text)
 }
 
 function normalizeSongCore(text) {
-  return String(text || '')
-    .replace(/（.*?）|\(.*?\)|\[.*?\]|【.*?】/g, ' ')
-    .replace(/\b(live|demo|version|ver\.?|remaster(ed)?|acoustic|mix)\b/gi, ' ')
-    .replace(/\s+/g, ' ')
-    .trim()
+  return stripTitleNoise(text)
 }
 
-function splitArtistNames(text) {
-  return String(text || '')
-    .split(/\/|&|,|，|、| x | X | feat\.?|ft\.?|with/gi)
-    .map(part => normalizeNcmText(part))
-    .filter(Boolean)
-}
-
-function scoreNcmCandidate(song, expectedName, expectedArtistParts) {
-  const candidateName = normalizeNcmText(song?.name)
-  const candidateCore = normalizeNcmText(normalizeSongCore(song?.name))
-  const expectedNameNorm = normalizeNcmText(expectedName)
-  const expectedCoreNorm = normalizeNcmText(normalizeSongCore(expectedName))
-  const candidateArtists = (song?.artists || []).map(a => normalizeNcmText(a.name)).filter(Boolean)
+function scoreNcmCandidate(song, requestedSong) {
+  const candidateArtists = (song?.artists || []).map(a => a.name).filter(Boolean)
+  const titleScore = titleMatchScore(buildTitleVariants(requestedSong), song?.name)
+  const artistScore = artistMatchScore(buildArtistVariants(requestedSong), candidateArtists)
 
   let score = 0
-  if (candidateName === expectedNameNorm) score += 70
-  else if (candidateCore === expectedCoreNorm) score += 56
-  else if (candidateName.includes(expectedCoreNorm) || expectedCoreNorm.includes(candidateName)) score += 40
-
-  for (const artistPart of expectedArtistParts) {
-    if (candidateArtists.includes(artistPart)) score += 24
-    else if (candidateArtists.some(name => name.includes(artistPart) || artistPart.includes(name))) score += 12
-  }
+  score += titleScore
+  score += Math.round(artistScore * 0.8)
 
   if (song?.alia?.length) {
     const aliasHit = song.alia.some(alias => {
       const normalizedAlias = normalizeNcmText(alias)
-      return normalizedAlias === expectedNameNorm || normalizedAlias === expectedCoreNorm
+      return buildTitleVariants(requestedSong).some(title => normalizeSongKey(title) === normalizedAlias)
     })
     if (aliasHit) score += 16
   }
@@ -501,42 +486,44 @@ function scoreNcmCandidate(song, expectedName, expectedArtistParts) {
   const coverKeywords = ['翻唱', 'cover', '致敬', '钢琴版', '吉他版', '纯音乐版', 'piano', 'acoustic', 'instrumental', 'tribute']
   const nameLower = String(song?.name || '').toLowerCase()
   const hasCoverKeyword = coverKeywords.some(kw => nameLower.includes(kw))
-  if (hasCoverKeyword) {
-    const artistMatch = expectedArtistParts.some(part =>
-      candidateArtists.some(n => n.includes(part) || part.includes(n))
-    )
-    if (!artistMatch) score -= 40
-  }
-
-  const fullArtistMatch = expectedArtistParts.length > 0 && expectedArtistParts.every(part =>
-    candidateArtists.some(n => n.includes(part) || part.includes(n))
-  )
-  if (fullArtistMatch) score += 15
+  if (hasCoverKeyword && artistScore < 68) score -= 40
 
   return score
 }
 
-async function ncmSearch(name, artist) {
+function buildNcmQueries(song) {
+  const titles = buildTitleVariants(song)
+  const artists = buildArtistVariants(song)
+  const queries = []
+
+  for (const title of titles.slice(0, 6)) {
+    queries.push(title)
+  }
+
+  for (const title of titles.slice(0, 4)) {
+    for (const artist of artists.slice(0, 3)) {
+      queries.push(`${title} ${artist}`.trim())
+      if (queries.length >= 12) return queries
+    }
+  }
+
+  return queries
+}
+
+async function ncmSearch(songOrName, artist) {
+  const requestedSong = makeSongSearchProfile(songOrName, artist)
   const base = process.env.NCM_API_BASE || 'http://localhost:3000'
-  const cacheKey = `${normalizeNcmText(name)}::${normalizeNcmText(artist)}`
+  const cacheKey = `${normalizeSongKey(requestedSong.name)}::${normalizeArtistKey(requestedSong.artist)}`
   const cached = getCachedSearchIds(cacheKey)
   if (cached) {
-    console.log(`[ncm] 命中搜索缓存 "${name} / ${artist}" -> ${cached.join(', ') || 'MISS'}`)
+    console.log(`[ncm] 命中搜索缓存 "${requestedSong.name} / ${requestedSong.artist}" -> ${cached.join(', ') || 'MISS'}`)
     return cached
   }
 
-  const queries = [
-    `${name} ${artist}`.trim(),
-    normalizeSongCore(name),
-  ].filter(Boolean)
-
   const seenIds = new Set()
   const candidates = []
-  const expectedArtistParts = splitArtistNames(artist)
 
-  for (let queryIndex = 0; queryIndex < queries.length; queryIndex++) {
-    const query = queries[queryIndex]
-    const isFallback = queryIndex > 0
+  for (const query of buildNcmQueries(requestedSong)) {
     const q = encodeURIComponent(query)
     const data = await ncmFetch(`${base}/search?keywords=${q}&limit=15`)
     const songs = data?.result?.songs || []
@@ -544,14 +531,8 @@ async function ncmSearch(name, artist) {
       const id = String(song.id)
       if (seenIds.has(id)) continue
       seenIds.add(id)
-      const score = scoreNcmCandidate(song, name, expectedArtistParts)
-      if (score < 36) continue
-      if (isFallback) {
-        const cands = (song?.artists || []).map(a => normalizeNcmText(a.name)).filter(Boolean)
-        const artistScore = expectedArtistParts.reduce((sum, part) =>
-          sum + (cands.includes(part) ? 24 : cands.some(n => n.includes(part) || part.includes(n)) ? 12 : 0), 0)
-        if (artistScore < 12) continue
-      }
+      const score = scoreNcmCandidate(song, requestedSong)
+      if (score < 72) continue
       candidates.push({ id, score, song })
     }
     if (candidates.length >= 5) break
@@ -568,7 +549,7 @@ async function ncmSearch(name, artist) {
   candidates.sort((a, b) => b.score - a.score)
 
   if (!candidates.length) {
-    console.log(`[ncm] 搜索 "${name} / ${artist}" 无可靠结果，跳过`)
+    console.log(`[ncm] 搜索 "${requestedSong.name} / ${requestedSong.artist}" 无可靠结果，跳过`)
     setCachedSearchIds(cacheKey, [])
     return []
   }
@@ -578,32 +559,35 @@ async function ncmSearch(name, artist) {
   return ids
 }
 
-async function checkArtistViaDetail(candidateId, expectedArtistParts, base) {
-  if (!expectedArtistParts.length) return true
+async function checkArtistViaDetail(candidateId, requestedSong, base) {
   try {
     const data = await ncmFetch(`${base}/song/detail?ids=${candidateId}`)
     const song = data?.songs?.[0]
     if (!song) return true
-    const actualArtists = (song.ar || []).map(a => normalizeNcmText(a.name)).filter(Boolean)
-    const artistScore = expectedArtistParts.reduce((sum, part) =>
-      sum + (actualArtists.includes(part) ? 24 : actualArtists.some(n => n.includes(part) || part.includes(n)) ? 12 : 0), 0)
-    if (artistScore < 12) {
-      console.log(`[ncm] 艺人不符 id=${candidateId}: 期望 [${expectedArtistParts}] 实际 [${actualArtists}]`)
+    const actualArtists = (song.ar || []).map(a => a.name).filter(Boolean)
+    const artistScore = artistMatchScore(buildArtistVariants(requestedSong), actualArtists)
+    const titleScore = titleMatchScore(buildTitleVariants(requestedSong), song.name)
+    if (titleScore < 72 || artistScore < 68) {
+      console.log(`[ncm] 艺人不符 id=${candidateId}: 期望 [${buildArtistVariants(requestedSong).join(' | ')}] 实际 [${actualArtists}]`)
       return false
     }
     return true
   } catch { return true }
 }
 
-async function ncmGetUrl(songId, name, artist) {
+async function ncmGetUrl(songOrId, name, artist) {
+  const requestedSong = makeSongSearchProfile(
+    songOrId && typeof songOrId === 'object'
+      ? songOrId
+      : { id: songOrId, name, artist }
+  )
   const base = process.env.NCM_API_BASE || 'http://localhost:3000'
   const tried = new Set()
   const candidateIds = []
-  const remembered = getRememberedSongId(name, artist)
-  const expectedArtistParts = splitArtistNames(artist)
+  const remembered = getRememberedSongId(requestedSong.name, requestedSong.artist)
 
   if (isLikelyNcmSongId(remembered?.id)) candidateIds.push(String(remembered.id))
-  if (isLikelyNcmSongId(songId) && String(songId) !== '0') candidateIds.push(String(songId))
+  if (isLikelyNcmSongId(requestedSong.id) && String(requestedSong.id) !== '0') candidateIds.push(String(requestedSong.id))
 
   for (const candidateId of candidateIds) {
     if (!candidateId || tried.has(candidateId)) continue
@@ -616,19 +600,19 @@ async function ncmGetUrl(songId, name, artist) {
         console.log(`[ncm] id=${candidateId} 为试听片段，跳过`)
         continue
       }
-      if (!(await checkArtistViaDetail(candidateId, expectedArtistParts, base))) continue
-      rememberSongIdMapping(name, artist, candidateId, 'hit')
-      if (candidateId !== String(songId)) {
-        console.log(`[ncm] 搜索命中 "${name} / ${artist}" -> ${candidateId}`)
+      if (!(await checkArtistViaDetail(candidateId, requestedSong, base))) continue
+      rememberSongIdMapping(requestedSong.name, requestedSong.artist, candidateId, 'hit')
+      if (candidateId !== String(requestedSong.id)) {
+        console.log(`[ncm] 搜索命中 "${requestedSong.name} / ${requestedSong.artist}" -> ${candidateId}`)
       }
       return { url: item.url, id: candidateId }
     }
   }
 
   if (candidateIds.length > 0) {
-    console.log(`[ncm] id ${candidateIds[0]} 无效，搜索 "${name} ${artist}"`)
+    console.log(`[ncm] id ${candidateIds[0]} 无效，搜索 "${requestedSong.name} ${requestedSong.artist}"`)
   }
-  const searchedIds = await ncmSearch(name, artist)
+  const searchedIds = await ncmSearch(requestedSong)
   for (const candidateId of searchedIds) {
     if (!candidateId || tried.has(candidateId)) continue
     tried.add(candidateId)
@@ -640,14 +624,14 @@ async function ncmGetUrl(songId, name, artist) {
         console.log(`[ncm] id=${candidateId} 为试听片段，跳过`)
         continue
       }
-      if (!(await checkArtistViaDetail(candidateId, expectedArtistParts, base))) continue
-      rememberSongIdMapping(name, artist, candidateId, 'hit')
-      console.log(`[ncm] 搜索命中 "${name} / ${artist}" -> ${candidateId}`)
+      if (!(await checkArtistViaDetail(candidateId, requestedSong, base))) continue
+      rememberSongIdMapping(requestedSong.name, requestedSong.artist, candidateId, 'hit')
+      console.log(`[ncm] 搜索命中 "${requestedSong.name} / ${requestedSong.artist}" -> ${candidateId}`)
       return { url: item.url, id: candidateId }
     }
   }
 
-  rememberSongIdMapping(name, artist, null, 'miss')
+  rememberSongIdMapping(requestedSong.name, requestedSong.artist, null, 'miss')
   return { url: null, id: null }
 }
 
@@ -662,7 +646,7 @@ async function resolveQueue(songs) {
         if (useSpotify) {
           let match = null
           try {
-            match = await spotify.searchTrack(song.name, song.artist)
+            match = await spotify.searchTrack(song)
           } catch (e) {
             console.error(`[spotify] 搜索失败 "${song.name} / ${song.artist}"，回退 NCM:`, e.message)
           }
@@ -686,7 +670,7 @@ async function resolveQueue(songs) {
           }
           console.log(`[spotify] 未命中 "${song.name} / ${song.artist}"，回退 NCM`)
         }
-        const { url, id: realId } = await ncmGetUrl(song.id, song.name, song.artist)
+        const { url, id: realId } = await ncmGetUrl(song)
         if (!url) return
         spotifyQueue[index] = {
           song_info: { ...song, id: realId || song.id },
