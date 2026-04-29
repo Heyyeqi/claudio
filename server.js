@@ -964,6 +964,38 @@ app.get('/api/plan/today', (req, res) => {
   res.json({ today_count: scheduler.getTodayCount(), recent_plays: plays })
 })
 
+// GET /auth/spotify — 跳转到 Spotify 授权页
+app.get('/auth/spotify', (req, res) => {
+  const url = spotify.getAuthUrl('rodiO')
+  res.redirect(url)
+})
+
+// GET /auth/spotify/callback 和 /callback — Spotify 授权回调
+app.get('/auth/spotify/callback', (req, res) => res.redirect('/callback?' + new URLSearchParams(req.query)))
+
+app.get('/callback', async (req, res) => {
+  const { code, error } = req.query
+  if (error || !code) {
+    return res.send(`<script>window.close()</script><p>授权失败：${error || '无 code'}</p>`)
+  }
+  try {
+    await spotify.exchangeCode(code)
+    console.log('[spotify] 用户授权成功，Spotify 播放已启用')
+    res.send(`
+      <html><body style="background:#080808;color:#C9A96E;font-family:sans-serif;display:flex;align-items:center;justify-content:center;height:100vh;margin:0">
+        <div style="text-align:center">
+          <p style="font-size:18px;margin-bottom:8px">✓ Spotify 已连接</p>
+          <p style="font-size:13px;opacity:0.6">可以关闭此页面</p>
+          <script>setTimeout(()=>window.close(),1500)</script>
+        </div>
+      </body></html>
+    `)
+  } catch (e) {
+    console.error('[spotify] callback 失败:', e.message)
+    res.send(`<p>授权失败：${e.message}</p>`)
+  }
+})
+
 const PORT = process.env.PORT || 8080
 server.listen(PORT, () => {
   console.log(`[claudio] 服务启动 → http://localhost:${PORT}`)
