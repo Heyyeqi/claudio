@@ -4,9 +4,14 @@ const claude = require('./claude')
 
 let wsClients = []
 let todayCount = 0
+let resolveQueueFn = null
 
 function setWsClients(clients) {
   wsClients = clients
+}
+
+function setResolveQueue(fn) {
+  resolveQueueFn = fn
 }
 
 function broadcast(data) {
@@ -45,11 +50,15 @@ cron.schedule('0 9-22 * * *', async () => {
   try {
     const ctx = await context.buildContext(input)
     const result = await claude.askClaude(ctx)
-    broadcast({ type: 'scheduled', hour: h, ...result })
+    let queue = []
+    if (resolveQueueFn && Array.isArray(result.play) && result.play.length > 0) {
+      queue = await resolveQueueFn(result.play)
+    }
+    broadcast({ type: 'scheduled', hour: h, ...result, queue })
     incrementCount()
   } catch (e) {
     console.error('[scheduler] 整点检查失败:', e.message)
   }
 })
 
-module.exports = { setWsClients, broadcast, getTodayCount, incrementCount }
+module.exports = { setWsClients, setResolveQueue, broadcast, getTodayCount, incrementCount }

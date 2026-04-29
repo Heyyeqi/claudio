@@ -1219,5 +1219,6 @@ server.listen(PORT, () => {
   console.log(fs.existsSync(COOKIE_PATH)
     ? '[claudio] 已加载网易云 Cookie'
     : '[claudio] 提示：未登录网易云，运行 node scripts/ncm-login.js')
+  scheduler.setResolveQueue(resolveQueue)
   bootstrapStation()
 })
