@@ -2107,7 +2107,8 @@
   }
 
   function connectWs() {
-    ws = new WebSocket(`ws://${location.host}/stream`)
+    const wsProtocol = location.protocol === 'https:' ? 'wss:' : 'ws:'
+    ws = new WebSocket(`${wsProtocol}//${location.host}/stream`)
 
     ws.onopen = () => {
       state.connected = true
