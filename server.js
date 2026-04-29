@@ -1024,8 +1024,8 @@ app.get('/icon-512.svg', (req, res) => {
   res.type('image/svg+xml').send(iconSvg(512))
 })
 
-app.use(express.static(path.join(__dirname, 'pwa')))
-app.use('/cache', express.static(path.join(__dirname, 'cache')))
+app.use(express.static(path.join(__dirname, 'pwa'), { maxAge: '7d', etag: true }))
+app.use('/cache', express.static(path.join(__dirname, 'cache'), { maxAge: '30d', etag: true }))
 
 // POST /api/chat
 app.post('/api/chat', async (req, res) => {
