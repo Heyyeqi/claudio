@@ -949,6 +949,79 @@
   let pendingSpotifyItem = null
   let spotifyPlayRetryCount = 0
 
+  // 获取最新 Spotify access token；失败时只警告，不中断页面逻辑
+  async function fetchSpotifyAccessToken() {
+    try {
+      const res = await fetch('/api/spotify/status')
+      const data = await res.json()
+      if (data && data.connected && data.access_token) {
+        spotifyToken = data.access_token
+        return spotifyToken
+      }
+      console.warn('[spotify] access token unavailable')
+      return null
+    } catch (error) {
+      console.warn('[spotify] fetch token failed:', error)
+      return null
+    }
+  }
+
+  // 激活网页播放器设备，后续 /play 必须命中这个 device_id
+  async function activateSpotifyDevice(deviceId) {
+    const token = await fetchSpotifyAccessToken()
+    if (!token || !deviceId) return false
+    try {
+      const res = await fetch('https://api.spotify.com/v1/me/player', {
+        method: 'PUT',
+        headers: {
+          Authorization: `Bearer ${token}`,
+          'Content-Type': 'application/json',
+        },
+        body: JSON.stringify({ device_ids: [deviceId], play: false }),
+      })
+      if (!res.ok) {
+        console.warn('[spotify] activate device failed:', res.status)
+        return false
+      }
+      return true
+    } catch (error) {
+      console.warn('[spotify] activate device error:', error)
+      return false
+    }
+  }
+
+  // Spotify 播放时静音并停掉 NCM audio，避免双声道同时播放
+  function silenceNcmAudioForSpotify() {
+    try {
+      audio.pause()
+      audio.muted = true
+      audio.volume = 0
+    } catch {}
+  }
+
+  // 切回 NCM 播放前恢复 audio 元素状态
+  function restoreNcmAudioOutput() {
+    audio.muted = false
+    audio.volume = state.volume
+  }
+
+  // 切到 NCM 时主动停掉 Spotify 播放器，避免后台继续播
+  async function pauseSpotifyPlayback() {
+    try {
+      if (spotifyPlayer && spotifyReady) {
+        const currentState = await spotifyPlayer.getCurrentState()
+        if (currentState && !currentState.paused) {
+          await spotifyPlayer.pause()
+        }
+      }
+    } catch (error) {
+      console.warn('[spotify] pause before NCM failed:', error)
+    } finally {
+      spotifyCurrentUri = null
+      clearInterval(spotifyProgressTimer)
+    }
+  }
+
   function syncCurrentTrackFromSpotifyState(s) {
     const track = s && s.track_window && s.track_window.current_track
     if (!track) return
@@ -972,12 +1045,8 @@
 
   async function fetchSpotifyStatus() {
     try {
-      const res = await fetch('/api/spotify/status')
-      const data = await res.json()
-      if (data.connected && data.access_token) {
-        spotifyToken = data.access_token
-        return true
-      }
+      const token = await fetchSpotifyAccessToken()
+      if (token) return true
       return false
     } catch { return false }
   }
@@ -991,17 +1060,18 @@
     spotifyPlayer = new Spotify.Player({
       name: 'RodiO',
       getOAuthToken: async cb => {
-        const res = await fetch('/api/spotify/status')
-        const data = await res.json()
-        cb(data.access_token || spotifyToken)
+        const token = await fetchSpotifyAccessToken()
+        cb(token || spotifyToken || '')
       },
       volume: 0.75,
     })
 
-    spotifyPlayer.addListener('ready', ({ device_id }) => {
+    spotifyPlayer.addListener('ready', async ({ device_id }) => {
       spotifyDeviceId = device_id
+      window.spotifyDeviceId = device_id
       spotifyReady = true
       console.log('[spotify] Player ready, device:', device_id)
+      await activateSpotifyDevice(device_id)
       if (pendingSpotifyItem) {
         const pending = pendingSpotifyItem
         pendingSpotifyItem = null
@@ -1019,6 +1089,7 @@
       const wasPlaying = state.playing
       const currentUri = s.track_window && s.track_window.current_track && s.track_window.current_track.uri
       syncCurrentTrackFromSpotifyState(s)
+      silenceNcmAudioForSpotify()
       state.playing = !s.paused
       state.progress = s.position / 1000
       state.duration = s.duration / 1000
@@ -1046,22 +1117,23 @@
   }
 
   async function spotifyPlay(uri) {
-    if (!spotifyReady || !spotifyDeviceId || !spotifyToken) return false
+    if (!spotifyReady || !spotifyDeviceId) return false
     try {
+      const token = await fetchSpotifyAccessToken()
+      if (!token) return false
+      silenceNcmAudioForSpotify()
       const res = await fetch(`https://api.spotify.com/v1/me/player/play?device_id=${spotifyDeviceId}`, {
         method: 'PUT',
         headers: {
-          Authorization: `Bearer ${spotifyToken}`,
+          Authorization: `Bearer ${token}`,
           'Content-Type': 'application/json',
         },
         body: JSON.stringify({ uris: [uri] }),
       })
       if (res.status === 401) {
         // token 过期，刷新后重试
-        const status = await fetch('/api/spotify/status')
-        const data = await status.json()
-        if (data.access_token) {
-          spotifyToken = data.access_token
+        const refreshedToken = await fetchSpotifyAccessToken()
+        if (refreshedToken) {
           return spotifyPlay(uri)
         }
         return false
@@ -1766,8 +1838,8 @@
     renderQueue()
     renderProgress()
 
-    // Spotify 播放路径
-    if (item.spotify_uri && spotifyReady) {
+    // Spotify 播放路径：优先遵守后端 source 标记，只有设备就绪时才直接走网页播放器
+    if (item.source === 'spotify' && item.spotify_uri && window.spotifyDeviceId) {
       spotifyPlay(item.spotify_uri).then(ok => {
         if (ok) {
           state.playing = true
@@ -1785,7 +1857,7 @@
       return
     }
 
-    if (item.spotify_uri) {
+    if (item.source === 'spotify' && item.spotify_uri) {
       pendingSpotifyItem = {
         item,
         options: { recordHistory, autoExplain },
@@ -1809,24 +1881,27 @@
       setTimeout(() => advanceToNext(), 800)
       return
     }
-    try {
-      audio.pause()
-      audio.src = ''
-    } catch (e) {}
-    audio.src = item.play_url
-    audio.load()
-    audio.play().then(() => {
-      state.playing = true
-      renderControls()
-      if (autoExplain) maybeAutoExplain(item)
-      setTimeout(prefetchNextExplain, 2000)
-    }).catch((e) => {
-      state.playing = false
-      state.currentTrack = prevTrack
-      renderHero()
-      renderControls()
-      console.error('[claudio] NCM 播放失败:', e.name, e.message)
-      setTimeout(() => advanceToNext(), 800)
+    pauseSpotifyPlayback().catch(() => {}).finally(() => {
+      restoreNcmAudioOutput()
+      try {
+        audio.pause()
+        audio.src = ''
+      } catch (e) {}
+      audio.src = item.play_url
+      audio.load()
+      audio.play().then(() => {
+        state.playing = true
+        renderControls()
+        if (autoExplain) maybeAutoExplain(item)
+        setTimeout(prefetchNextExplain, 2000)
+      }).catch((e) => {
+        state.playing = false
+        state.currentTrack = prevTrack
+        renderHero()
+        renderControls()
+        console.error('[claudio] NCM 播放失败:', e.name, e.message)
+        setTimeout(() => advanceToNext(), 800)
+      })
     })
   }
 
