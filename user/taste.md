@@ -1,66 +1,132 @@
-# 音乐品味画像（从真实歌单提炼）
+# RW 音乐品味档案
+> 审美校准器，不是推荐名单。
+> 这里列出的艺人是品味的参照坐标，不是边界。
+> 选曲时已知艺人与未知艺人比例建议 4:6，主动挖掘 RW 尚未听过但会喜欢的作品。
 
-## 核心艺人（收藏次数最多、最高频出现）
+---
 
-**华语**
-王菲（专属歌单 + 跨歌单高频，偏好《红豆》《我愿意》《暗涌》《流星》《美错》《只爱陌生人》时期）
-梁静茹（《丝路》《崇拜》《第三者》《C'est La Vie》等，偏好温柔 R&B）
-孙盛希（《Let it roll》《暧》《梦游》，台湾独立女声）
-莫文蔚（《忽然之间》《完美孤独》《电台情歌》《爱可留痕》《散》）
-田馥甄（《灵魂伴侣》《无常 Live》《Baby Song Live》，内敛克制的独立气质）
-陈绮贞（《嫉妒》《小步舞曲》，文人质感）
-杨乃文（《应该》《最初的地方》，粗粝冷感）
-孙燕姿（《雨天》《愚人的国度》）
-郭顶（《水星记》，质感编曲）
-窦靖童（《Fruit Fly》《Satellite》）
+## 审美核心
 
-**日系**
-坂本龍一（高频核心：《Merry Christmas Mr. Lawrence》系列完整收藏 + 《Andata》《Rain》《Flying for Thailand》）
-久石譲（《HANA-BI》《Silent Love》《Princess Mononoke》，宫崎骏/北野武电影配乐）
-Nujabes（《Luv(sic)》系列、《Sea of Cloud》，lo-fi hip-hop 鼻祖）
-Uyama Hiroto（Nujabes 门徒，《Monochrome Garden》《Waiting For...》）
+**有东西藏在里面，但不急着告诉你。**
 
-**欧美**
-Grimes（《REALiTi》《Be A Body》，Art Pop 核心）
-FKA twigs（《Lights On》《Sushi》）
-FKJ（《Drops》《Moments》，nu-jazz / lo-fi soul）
-Billie Eilish（《ocean eyes》，低吟暗调）
-Janet Jackson（《That's the Way Love Goes》《If》，R&B 经典）
-Lana Del Rey（《Young and Beautiful》，电影感）
-Athletics（《III》出现 6 次以上，ambient post-rock 最爱单曲）
-New Order（《Elegia》《Bizarre Love Triangle》，冷酷电子）
-George Michael / Wham!（专属歌单，深度收藏）
-The Weeknd（《Earned It》《The Hills》，暗调 R&B）
+情绪有密度，表达有节制。编曲有层次，留有呼吸。
+人声是乐器之一，歌词是唱腔而非信息载体——语言不设限，好听即可。
+可以极度安静，也可以有壮阔释放，但从不廉价，从不情绪外露。
 
-## 偏好风格（按喜好程度）
+追求的不是忧郁，是**质感**。忧郁只是质感的副产品。
 
-1. **Lo-fi / Nu-jazz / Neo-soul**：Nujabes、FKJ、Uyama Hiroto、Chris Minh Doky 路线，有颗粒感的温热
-2. **Art Pop / 另类流行**：Grimes、FKA twigs、Lorde、St. Vincent，有概念感、不走寻常路
-3. **华语抒情 R&B**：王菲、梁静茹、孙盛希、莫文蔚，质感胜于流行度
-4. **日系电影配乐 / 当代古典**：坂本龍一、久石譲、Jóhann Jóhannsson，画面感强
-5. **Ambient / Post-rock**：Athletics、Explosions in the Sky、Sigur Rós、Hammock，情绪纵深
-6. **冷调电子**：New Order、Depeche Mode、36、Helios，工业质感
-7. **Indie Pop**：陈绮贞、郭顶、窦靖童，台湾文青脉络
-8. **当代 R&B / Alt-R&B**：FKA twigs、Snoh Aalegra、Kehlani、Oklou
+---
 
-## 情绪-时段对照（从歌单结构推断）
+## 审美红线（立刻跳过）
 
-- **晨间 / 午后** → Nujabes、FKJ、坂本龍一轻量作品、梁静茹、孙盛希
-- **工作专注** → Athletics、Helios、36、Hammock、ambient post-rock
-- **傍晚放松** → 莫文蔚、陈绮贞、王菲抒情期、郭顶
-- **深夜独处** → 坂本龍一、Grimes、FKA twigs、王菲《只爱陌生人》时期、The Weeknd
-- **情绪低谷** → Sigur Rós、Explosions in the Sky、田馥甄 live
+触发跳过的不是风格本身，而是**审美态度的缺失**：
+- 旋律煽情、情绪全摆在表面、没有任何留白
+- 歌词直白到像在朗读
+- 为烘托派对气氛而存在的传统电音（旋律老化、无质感）
+- 代表性禁区：薛之谦、汪苏泷、张杰、凤凰传奇、快乐家族
 
-## 明确排斥
+注意：电子音乐本身不是禁区。
+Madonna《Ray of Light》、Mariah《Caution》、王菲的电子编曲——
+有品位、有质感的电子完全接受。
+排斥的是**用电子包装廉价情绪**的那类。
 
-- 无聊华语口水流行（非上述艺人的泛流行）
-- 歇斯底里嘶吼、过度失真的金属（跑步歌单除外，日常不要）
-- 纯 EDM 大 drop（无情绪纵深的电子）
-- 过于廉价的偶像流水线产品
+---
 
-## 特别标注
+## 核心审美锚点
 
-- **坂本龍一《Merry Christmas Mr. Lawrence》** 是有特殊意义的曲目，建议在合适时机单独推荐
-- **Athletics《III》** 是高频收藏，情绪贴合时可放
-- 用户有**电影配乐收藏癖**（王家卫、北野武、宫崎骏、La La Land、花样年华），这些也可以在适合的氛围下推荐
-- 用户收藏了完整的王菲幻乐一场歌单，对王菲有很深的情感连接
+### 参照专辑（理解 RW 审美的最短路径）
+- 王菲《将爱》——用任何合适的形式表达自己，不被风格定义
+- 莫文蔚《拉活》——有特色有想法，市井质感与内在沉重并存
+- The Weeknd《Dawn FM》——深夜电台叙事，忧郁但有玻璃质感的距离感
+- Nicola Conte《Rituals》——nu jazz，仪式感，空间极大，从不用力
+- S-Stone《Luz y Sombra》——光影对比，拉丁+电子+氛围，克制的戏剧性
+- Magdalena Bay《Imaginal Disk》——概念性强，电子+流行，极有创意不走寻常路
+
+### 参照单曲（情绪校准器）
+- 坂本龍一《Merry Christmas Mr. Lawrence》Live版——Live版有呼吸，录音室版太标准
+- 坂本龍一《Andata》——旋律感与留白的平衡点
+- Athletics《Ⅲ》——纯后摇370秒，情绪在结构里流动，不靠人声
+- OMA & Shing02《One Day》——lo-fi底，疏离忧郁，把悲伤放在很远的地方看
+- Mew《Comforting Sounds》——长铺垫+壮阔释放，喜欢这种耐心的结构
+- NewJeans《Cool With You》《OMG》——轻盈干净，精致但像在呼吸
+- 莫文蔚《安可》——克制的情感张力
+- 萧蔷《现在的我们》——声线本身打动人，不依赖包装
+- 李思齐《Diary》伴奏——连伴奏都值得听，编曲质感极高
+- 云中加冕序章（2.0纯享）——要的是编曲本身，不是歌词叙事
+
+---
+
+## 品味坐标系（参照，不是边界）
+
+### 声音质感维度
+**空间感极大、能量低、情绪内敛**
+→ 参照：坂本龍一、Nujabes、All India Radio、Ólafur Arnalds、Joep Beving
+→ 挖掘方向：ambient、新古典、当代器乐、lo-fi、日系电子
+
+**克制的忧郁、有疏离美、chill**
+→ 参照：Lana Del Rey、RY X、Nicola Conte、Berlioz
+→ 挖掘方向：dream pop、nu jazz、indie folk、氛围民谣
+
+**有仪式感、叙事性强、电影感**
+→ 参照：坂本龍一电影配乐、Alexandre Desplat、梅林茂、谭盾、马友友
+→ 挖掘方向：当代古典、跨界器乐、电影原声、室内乐
+
+**情绪需要释放但不用力、有壮阔感**
+→ 参照：Mew、M83、Son Lux、UNKLE、Magdalena Bay
+→ 挖掘方向：后摇、太空摇滚、实验流行、电影级电子
+
+**精致流行、轻盈不用力**
+→ 参照：NewJeans、方大同、王诗安、萧亚轩早期
+→ 挖掘方向：城市流行、R&B、当代华语独立、日系流行
+
+### 人声维度（辨识度极高的声线优先）
+喜欢：王菲、莫文蔚、宇多田ヒカル、袁娅维、萧蔷、Lana Del Rey
+这类声线的共同点：辨识度高、情感克制但穿透力强、不过度修饰
+→ 挖掘方向：寻找有相似声线质感但 RW 尚未发现的歌手
+
+### 器乐维度
+纯器乐倾向 0.347（曲库均值），人声被当乐器用
+→ 大量无人声曲目完全成立，不需要理由
+
+---
+
+## 艺人注记（精细版）
+
+**王菲**：不用风格标签定义她。早期翻唱、粤语、国语、电子编曲均有佳作。
+任何时候都可以推，作品跨度极大。
+
+**坂本龍一**：旋律感强、同时承载情绪与叙事是核心吸引力。
+偏好电影配乐和Live版本。《async》专辑仅《Andata》适合。
+
+**莫文蔚**：有想法有特色，不讨好。任何时候都可以推。
+
+**NewJeans**：不作为韩流处理。审美内核与其他最爱一致，任何场合适合。
+
+**韩流（其他）**：BLACKPINK、TWICE、aespa 等主要用于运动/徒步场景。
+
+**方大同**：和声层次极丰富，制作人思维，华语里的精致异类。
+
+**Lana Del Rey**：风格高度统一，想chill时首选，整体没有难听的歌。
+
+**Berlioz（英国）**：当代爵士，自由，近几张专辑尤佳。
+
+---
+
+## 声学特征参考（基于真实曲库 8,973 首均值）
+- 原声感 0.439——电子与原声各半，不偏执任何一端
+- 能量 0.500——中等，不追求极端
+- 正向情绪 0.342——整体偏忧郁，但忧郁是质感的副产品
+- 纯器乐倾向 0.347——人声是乐器之一，大量无人声曲目
+- BPM 118——中速为主，不追求快节奏
+
+---
+
+## 选曲的核心判断
+
+问自己一个问题：**这首歌有没有把情绪藏起来一部分？**
+有——大概率合适。
+没有，全部摆在表面——跳过。
+
+第二个问题：**这首歌 RW 可能还不知道，但听到第一句就会觉得"这就是我要的"吗？**
+有这种可能——优先推荐。
+只是重复已知——降低权重。
