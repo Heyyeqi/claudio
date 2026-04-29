@@ -2076,6 +2076,9 @@
               if (data.say_audio) {
                 setTimeout(() => playVoice(data.say_audio, true), audio.src ? 180 : 260)
               }
+            } else if (!hasUnlockedAudio) {
+              state.showStartOverlay = true
+              renderOverlay()
             }
           }
         }
