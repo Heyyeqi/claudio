@@ -2,7 +2,6 @@ const fs = require('fs')
 const path = require('path')
 const { Lunar } = require('lunar-javascript')
 const state = require('./state')
-const { samplePool } = require('./songpool')
 const { getAstronomyContext } = require('./astronomy')
 
 const ROOT = path.join(__dirname, '..')
@@ -28,6 +27,17 @@ const shanghaiHourFormatter = new Intl.DateTimeFormat('en-GB', {
   hour: '2-digit',
   hour12: false,
 })
+
+async function fetchJsonWithTimeout(url, options = {}, timeoutMs = 8000) {
+  const controller = new AbortController()
+  const timer = setTimeout(() => controller.abort(), timeoutMs)
+  try {
+    const res = await fetch(url, { ...options, signal: controller.signal })
+    return res
+  } finally {
+    clearTimeout(timer)
+  }
+}
 
 function readFile(relPath) {
   try {
@@ -124,6 +134,19 @@ function normalizeCityName(name, fallbackLabel) {
   return value
 }
 
+function makeLocationParts(cityLine, areaLine, fallbackLabel = '当前位置') {
+  const city = normalizeCityName(cityLine, fallbackLabel)
+  const area = normalizeCityName(areaLine, '')
+  return {
+    cityLine: city,
+    areaLine: area && area !== city ? area : '',
+  }
+}
+
+function makeEmptyLocationParts() {
+  return { cityLine: '', areaLine: '' }
+}
+
 function makeWeatherState({
   main = 'Clear',
   description = '未知',
@@ -135,21 +158,28 @@ function makeWeatherState({
   sunriseTs = null,
   sunsetTs = null,
   cloudiness = null,
+  cityLine = '',
+  areaLine = '',
 }) {
   const displayCity = normalizeCityName(city || locationName, '当前位置')
   const displayLocation = normalizeCityName(locationName || city, displayCity)
+  const locationParts = cityLine || areaLine
+    ? makeLocationParts(cityLine || displayCity, areaLine || displayLocation, displayCity)
+    : makeEmptyLocationParts()
   return {
     main,
     description,
     temp,
     city: displayCity,
     locationName: displayLocation,
+    cityLine: locationParts.cityLine,
+    areaLine: locationParts.areaLine,
     sunrise,
     sunset,
     sunriseTs,
     sunsetTs,
     cloudiness,
-    text: `${displayCity}，${description}，${temp}°C`,
+    text: `${locationParts.cityLine}${locationParts.areaLine ? ' ' + locationParts.areaLine : ''}，${description}，${temp}°C`,
   }
 }
 
@@ -173,46 +203,89 @@ function formatWeather(data, fallbackLabel, cityLabel = null) {
   const sunsetTs = data?.sys?.sunset || null
   const sunrise = formatClock(data?.sys?.sunrise)
   const sunset = formatClock(data?.sys?.sunset)
+  const parts = typeof cityLabel === 'object' && cityLabel
+    ? cityLabel
+    : makeLocationParts(cityLabel || locationName, '', locationName)
   return makeWeatherState({
     main,
     description: desc,
     temp,
-    city: cityLabel || locationName,
+    city: parts.cityLine || locationName,
     locationName,
     sunrise,
     sunset,
     sunriseTs,
     sunsetTs,
     cloudiness: typeof data?.clouds?.all === 'number' ? data.clouds.all : null,
+    cityLine: parts.cityLine,
+    areaLine: parts.areaLine,
   })
 }
 
 async function fetchCityLabelByCoords(lat, lon, fallbackLabel) {
-  const key = process.env.WEATHER_API_KEY
-  if (!key || key === 'xxxxxxxx') return normalizeCityName(fallbackLabel, '当前位置')
-
   try {
-    const url = `https://api.openweathermap.org/geo/1.0/reverse?lat=${lat}&lon=${lon}&limit=1&appid=${key}`
-    const res = await fetch(url)
+    // 用 Nominatim（OpenStreetMap）反地理编码，精度到区县级，免费无需 Key
+    const url = `https://nominatim.openstreetmap.org/reverse?lat=${lat}&lon=${lon}&format=json&accept-language=zh,en&zoom=12`
+    const res = await fetchJsonWithTimeout(url, {
+      headers: { 'User-Agent': 'RodiO/1.0 (personal music app)' }
+    })
     const data = await res.json()
-    const place = Array.isArray(data) ? data[0] : null
-    if (!place) return normalizeCityName(fallbackLabel, '当前位置')
+    const addr = data?.address
+    if (!addr) return makeEmptyLocationParts()
 
-    // For CN locations, state usually maps better to the city/municipality level
-    // than the district-like `name` field returned by the weather endpoint.
-    if (place.country === 'CN' && place.state) {
-      return normalizeCityName(place.local_names?.zh || place.state, fallbackLabel)
+    const country = addr.country_code?.toUpperCase()
+
+    // 中国：城市 + 区县
+    if (country === 'CN') {
+      const city = addr.city || addr.municipality || addr.state_district || addr.county || addr.state || ''
+      const district = addr.city_district || addr.district || addr.suburb || ''
+      return city || district ? makeLocationParts(city || district, district, '当前位置') : makeEmptyLocationParts()
     }
 
-    return normalizeCityName(
-      place.local_names?.zh ||
-      place.name ||
-      place.state ||
-      fallbackLabel,
-      '当前位置'
-    )
+    // 日本：都市 + 区
+    if (country === 'JP') {
+      const city = addr.city || addr.town || addr.county || ''
+      const ward = addr.city_district || addr.suburb || ''
+      return city || ward ? makeLocationParts(city || ward, ward, '当前位置') : makeEmptyLocationParts()
+    }
+
+    // 美国：城市, 州缩写
+    if (country === 'US') {
+      const city = addr.city || addr.town || addr.village || addr.county || ''
+      const stateAbbr = addr.ISO3166_2_lvl4?.replace('US-', '') || addr.state || ''
+      return city || stateAbbr ? makeLocationParts(city || stateAbbr, stateAbbr, '当前位置') : makeEmptyLocationParts()
+    }
+
+    // 英国：城市 + 区
+    if (country === 'GB') {
+      const city = addr.city || addr.town || addr.county || ''
+      const district = addr.city_district || addr.suburb || ''
+      return city || district ? makeLocationParts(city || district, district, '当前位置') : makeEmptyLocationParts()
+    }
+
+    // 其他国家：城市（+ 区，如果有）
+    const city = addr.city || addr.town || addr.municipality || addr.county || addr.state || ''
+    const district = addr.city_district || addr.district || addr.suburb || ''
+    return city || district ? makeLocationParts(city || district, district, '当前位置') : makeEmptyLocationParts()
+
   } catch {
-    return normalizeCityName(fallbackLabel, '当前位置')
+    // Nominatim 失败时 fallback 到 OpenWeatherMap geo
+    try {
+      const key = process.env.WEATHER_API_KEY
+      if (!key || key === 'xxxxxxxx') return makeEmptyLocationParts()
+      const url = `https://api.openweathermap.org/geo/1.0/reverse?lat=${lat}&lon=${lon}&limit=1&appid=${key}`
+      const res = await fetchJsonWithTimeout(url)
+      const geoData = await res.json()
+      const place = Array.isArray(geoData) ? geoData[0] : null
+      if (!place) return makeEmptyLocationParts()
+      return makeLocationParts(
+        place.local_names?.zh || place.name || place.state || fallbackLabel,
+        place.state || '',
+        '当前位置'
+      )
+    } catch {
+      return makeEmptyLocationParts()
+    }
   }
 }
 
@@ -224,6 +297,8 @@ async function fetchWeatherByCoords(lat, lon) {
       temp: '?',
       city: '当前位置',
       locationName: '当前位置',
+      cityLine: '',
+      areaLine: '',
     })
     return currentWeather
   }
@@ -231,7 +306,7 @@ async function fetchWeatherByCoords(lat, lon) {
   try {
     const url = `https://api.openweathermap.org/data/2.5/weather?lat=${lat}&lon=${lon}&appid=${key}&units=metric&lang=zh_cn`
     const [res, cityLabel] = await Promise.all([
-      fetch(url),
+      fetchJsonWithTimeout(url),
       fetchCityLabelByCoords(lat, lon, '当前位置'),
     ])
     const data = await res.json()
@@ -243,6 +318,8 @@ async function fetchWeatherByCoords(lat, lon) {
       temp: '?',
       city: '当前位置',
       locationName: '当前位置',
+      cityLine: '',
+      areaLine: '',
     })
     return currentWeather
   }
@@ -257,13 +334,15 @@ async function fetchWeatherByCity() {
       temp: '?',
       city,
       locationName: city,
+      cityLine: '',
+      areaLine: '',
     })
     return currentWeather
   }
 
   try {
     const url = `https://api.openweathermap.org/data/2.5/weather?q=${encodeURIComponent(city)}&appid=${key}&units=metric&lang=zh_cn`
-    const res = await fetch(url)
+    const res = await fetchJsonWithTimeout(url)
     const data = await res.json()
     currentWeather = formatWeather(data, city)
     return currentWeather
@@ -273,6 +352,8 @@ async function fetchWeatherByCity() {
       temp: '?',
       city,
       locationName: city,
+      cityLine: '',
+      areaLine: '',
     })
     return currentWeather
   }
@@ -383,21 +464,7 @@ async function buildContext(userInput, options = {}) {
     .filter(Boolean)
   const queueStr = queueSongs.length ? queueSongs.join('、') : '无'
 
-  // ⑤ 从用户真实曲库中采样候选歌曲（排除近期已播）
-  const excludeKeys = new Set([
-    ...dedupedPlays.map(p => `${p.song_name}::${p.artist}`.toLowerCase()),
-    ...dislikedSongs.map(p => `${p.song_name}::${p.artist}`.toLowerCase()),
-    ...recentRecommendedKeys,
-    ...currentQueue
-      .map(item => item?.song_info
-        ? `${item.song_info.name}::${item.song_info.artist}`.toLowerCase()
-        : null)
-      .filter(Boolean),
-  ])
-  const poolSample = samplePool(120, excludeKeys, {
-    preferredArtists: likedArtists,
-  })
-  const poolStr = poolSample.map(s => `${s.name} / ${s.artist}`).join('\n')
+
 
   const system = [
     persona,
@@ -424,12 +491,15 @@ async function buildContext(userInput, options = {}) {
     `## 当前队列中已有的歌（禁止重复推荐这些歌）\n${queueStr}`,
     `## 最近已经推荐过但仍在冷却期内的歌（也请避免重复）\n${recentRecommendedKeys.size ? [...recentRecommendedKeys].join('、') : '无'}`,
     '---',
-    '## 可选曲库（必须从此列表中选曲，不要编造列表外的歌曲）',
-    poolStr,
+    '## 选曲方向',
+    '不限定曲库范围。你有权推荐任何真实存在的歌曲，包括 RW 可能尚未发现的作品。',
+    '推荐比例：已知艺人（出现在 taste.md 坐标系中的）与未知艺人保持约 4:6，主动挖掘符合审美但 RW 大概率还没听过的作品。',
+    '核心判断标准：用 taste.md 的审美坐标做过滤器，而非名单。一首歌是否合适，取决于它有没有"把情绪藏起来一部分"。',
+    '你必须且只能输出一个合法 JSON 对象，不含任何 markdown 包裹，格式如下：',
     '---',
     '你必须且只能输出一个合法 JSON 对象，不含任何 markdown 包裹，格式如下：',
-    '{"say":"播报文案，一次介绍这批歌的整体氛围（将被转为语音，100字以内）","play":[{"id":"0","name":"歌名（必须来自可选曲库）","artist":"艺人全名（必须来自可选曲库）"}],"reason":"内部选曲逻辑说明（不播报）","segue":"播完最后一首后衔接下一批的话"}',
-    '【选曲规则】① play 数组包含 8-12 首 ② 所有歌曲必须来自上方"可选曲库"，歌名和艺人名保持原样，不得修改 ③ 禁止推荐"用户明确不喜欢的歌"、"近期已播放"或"当前队列中已有的歌"里的任何一首 ④ 如果用户点过喜欢，优先延续这些歌或这些艺人的气质、编曲、情绪线索，但不要机械重复同一首 ⑤ 根据当前时间和用户品味从曲库中挑选最契合的几首 ⑥ 如果用户只是闲聊不涉及音乐，play 数组可为空 ⑦ artist 字段必须填写原唱艺人全名，禁止填写翻唱歌手、配乐版、钢琴版、纯音乐版等非原唱版本的艺人名',
+    '{"say":"播报文案，一次介绍这批歌的整体氛围（将被转为语音，100字以内）","play":[{"id":"0","name":"歌名","artist":"艺人全名","name_en":"英文歌名；如无则空字符串","artist_en":"英文艺人名；如无则空字符串","name_tw":"繁体歌名；仅当与简体不同才填写，否则空字符串"}],"replace_pool":false,"reason":"内部选曲逻辑说明（不播报）","segue":"播完最后一首后衔接下一批的话"}',
+    '【选曲规则】① play 数组默认输出 8-12 首；如果当前请求明确要求 15 首，则必须输出 15 首 ② 歌曲自由生成，不受曲库限制，但必须是真实存在的歌曲——name 和 artist 必须准确，没有把握时宁可少推，不要编造 ③ 每首歌额外尽量补全 name_en、artist_en、name_tw；没有把握时返回空字符串，不要编造 ④ 禁止推荐"用户明确不喜欢的歌"、"近期已播放"或"当前队列中已有的歌"里的任何一首 ⑤ 如果用户点过喜欢，优先延续这些歌或这些艺人的气质、编曲、情绪线索，但不要机械重复同一首 ⑥ 推荐比例保持已知艺人 4 : 未知艺人 6，主动发现 RW 尚未听过但品味完全吻合的作品 ⑦ 如果用户只是闲聊不涉及音乐，play 数组可为空 ⑧ artist 字段必须填写原唱艺人全名，禁止填写翻唱歌手、配乐版、钢琴版、纯音乐版等非原唱版本的艺人名 ⑨ replace_pool 是布尔值：只有当用户明确要求完全换一种风格、情绪或方向，导致当前池子整体都不该继续时，才返回 true；普通的补充、微调、延续、陪聊后一两句点歌都返回 false',
     '请根据以上天文与文化背景，结合时段和天气，选择在此刻听来最自然、最贴切的音乐。不要只考虑时段标签，要考虑今天这一天的具体质感。清明前后选曲应有感伤或宁静；梅雨季选曲应有绵长或慵懒；满月深夜选曲可以更空灵；节气当天可以选有仪式感的音乐。',
   ].join('\n')
 
