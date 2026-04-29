@@ -1903,6 +1903,10 @@
     return false
   }
 
+  function requestQueuePrefetch() {
+    fetch('/api/next?peek=1').catch(() => {})
+  }
+
   const prefetchCache = new Map()
   const PREFETCH_TTL_MS = 30 * 60 * 1000
 
@@ -1940,15 +1944,18 @@
   async function advanceToNext() {
     hasUnlockedAudio = true
 
-    // 低水位触发：队列剩余少于3首时，静默向服务端请求补充
-    if (localQueue.length <= 3) {
-      fetch('/api/next?peek=1').catch(() => {})
+    // 预取阈值：切歌后剩余 <= 2 首时，就提前向服务端请求补货
+    if (localQueue.length <= 2) {
+      requestQueuePrefetch()
     }
 
     if (localQueue.length > 0) {
       const next = localQueue.shift()
       state.queue = localQueue.slice()
       renderQueue()
+      if (localQueue.length <= 2) {
+        requestQueuePrefetch()
+      }
       playSong(next)
       return
     }
