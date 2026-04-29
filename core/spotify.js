@@ -213,7 +213,11 @@ async function runSpotifySearch(query, retries = 2) {
     )
     if (res.status === 429) {
       const retryAfter = parseInt(res.headers.get('retry-after') || '1', 10)
-      const wait = (retryAfter * 1000) || (1000 * Math.pow(2, attempt))
+      if (retryAfter > 60) {
+        console.warn(`[spotify] 429 限流，retry-after=${retryAfter}s 超出上限，直接跳过`)
+        return []
+      }
+      const wait = retryAfter * 1000
       console.warn(`[spotify] 429 限流，等待 ${wait}ms 后重试 (${attempt + 1}/${retries})`)
       if (attempt < retries) {
         await new Promise(r => setTimeout(r, wait))
