@@ -1,12 +1,10 @@
 // ── Spotify 模块 ─────────────────────────────────────────────────
 const state = require('./state')
-const fs = require('fs')
-const path = require('path')
 const CLIENT_ID = process.env.SPOTIFY_CLIENT_ID
 const CLIENT_SECRET = process.env.SPOTIFY_CLIENT_SECRET
 const REDIRECT_URI = process.env.SPOTIFY_REDIRECT_URI || 'https://web-production-a5193.up.railway.app/callback'
+const RAILWAY_GRAPHQL_ENDPOINT = 'https://backboard.railway.app/graphql/v2'
 const SPOTIFY_TOKEN_PREF = 'spotify_user_token_v1'
-const SPOTIFY_TOKEN_FILE = path.join(__dirname, '../.spotify-token.json')
 const SPOTIFY_BAD_TITLE_KWS = [
   'live', 'remix', 'acoustic', 'instrumental', 'cover', 'tribute',
   'karaoke', 'piano', 'version', 'ver.', 'edit', 'mono', 'demo',
@@ -36,52 +34,103 @@ function applyPersistedUserToken(parsed) {
   return !!(userAccessToken || userRefreshToken)
 }
 
-function loadUserTokenFromFile() {
-  try {
-    if (!fs.existsSync(SPOTIFY_TOKEN_FILE)) return null
-    const raw = fs.readFileSync(SPOTIFY_TOKEN_FILE, 'utf8')
-    if (!raw) return null
-    return JSON.parse(raw)
-  } catch (e) {
-    console.error('[spotify] 读取 token 文件失败:', e.message)
-    return null
+function getRailwayTokenContext() {
+  return {
+    apiToken: process.env.RAILWAY_API_TOKEN || '',
+    projectId: process.env.RAILWAY_PROJECT_ID || '',
+    serviceId: process.env.RAILWAY_SERVICE_ID || '',
+    environmentId: process.env.RAILWAY_ENVIRONMENT_ID || '',
   }
 }
 
 function loadPersistedUserToken() {
   try {
-    const fileToken = loadUserTokenFromFile()
-    if (applyPersistedUserToken(fileToken)) return
-
-    const raw = state.getPref(SPOTIFY_TOKEN_PREF)
-    if (raw && applyPersistedUserToken(JSON.parse(raw))) return
-
     const envToken = {
       access_token: process.env.SPOTIFY_ACCESS_TOKEN || null,
       refresh_token: process.env.SPOTIFY_REFRESH_TOKEN || null,
       expires_at: Number(process.env.SPOTIFY_TOKEN_EXPIRES_AT || 0) || 0,
     }
-    applyPersistedUserToken(envToken)
+    if (applyPersistedUserToken(envToken)) return
+
+    const raw = state.getPref(SPOTIFY_TOKEN_PREF)
+    if (raw && applyPersistedUserToken(JSON.parse(raw))) return
   } catch {}
 }
 
-function persistUserToken() {
+async function railwayGraphqlRequest(query, variables) {
+  const { apiToken } = getRailwayTokenContext()
+  if (!apiToken) throw new Error('缺少 RAILWAY_API_TOKEN')
+  const res = await fetchJsonWithTimeout(RAILWAY_GRAPHQL_ENDPOINT, {
+    method: 'POST',
+    headers: {
+      'Content-Type': 'application/json',
+      Authorization: `Bearer ${apiToken}`,
+    },
+    body: JSON.stringify({ query, variables }),
+  }, 10000)
+  const data = await res.json()
+  if (!res.ok || data?.errors?.length) {
+    const message = data?.errors?.map(item => item.message).filter(Boolean).join('; ')
+      || `Railway API 请求失败(${res.status})`
+    throw new Error(message)
+  }
+  return data?.data || null
+}
+
+async function persistUserToken() {
   const payload = {
-    access_token: userAccessToken,
-    refresh_token: userRefreshToken,
-    expires_at: userTokenExpiresAt,
+    access_token: userAccessToken || '',
+    refresh_token: userRefreshToken || '',
+    expires_at: String(userTokenExpiresAt || 0),
     updated_at: Date.now(),
   }
-  try {
-    fs.writeFileSync(SPOTIFY_TOKEN_FILE, JSON.stringify(payload, null, 2))
-  } catch (e) {
-    console.error('[spotify] 写入 token 文件失败:', e.message)
-  }
+
   try {
     state.setPref(SPOTIFY_TOKEN_PREF, JSON.stringify(payload))
   } catch (e) {
     console.error('[spotify] 保存 token 失败:', e.message)
   }
+
+  const { projectId, serviceId, environmentId, apiToken } = getRailwayTokenContext()
+  if (!apiToken || !projectId || !serviceId || !environmentId) {
+    console.warn('[spotify] 未配置完整 Railway API 上下文，跳过环境变量持久化')
+    return false
+  }
+
+  await railwayGraphqlRequest(
+    `mutation VariableCollectionUpsert(
+      $projectId: String!,
+      $environmentId: String!,
+      $serviceId: String!,
+      $variables: EnvironmentVariables!
+    ) {
+      variableCollectionUpsert(
+        input: {
+          projectId: $projectId,
+          environmentId: $environmentId,
+          serviceId: $serviceId,
+          variables: $variables,
+          replace: false,
+          skipDeploys: true
+        }
+      )
+    }`,
+    {
+      projectId,
+      environmentId,
+      serviceId,
+      variables: {
+        SPOTIFY_ACCESS_TOKEN: payload.access_token,
+        SPOTIFY_REFRESH_TOKEN: payload.refresh_token,
+        SPOTIFY_TOKEN_EXPIRES_AT: payload.expires_at,
+      },
+    }
+  )
+
+  process.env.SPOTIFY_ACCESS_TOKEN = payload.access_token
+  process.env.SPOTIFY_REFRESH_TOKEN = payload.refresh_token
+  process.env.SPOTIFY_TOKEN_EXPIRES_AT = payload.expires_at
+  return true
 }
 
 loadPersistedUserToken()
@@ -92,7 +141,7 @@ async function initializeUserToken() {
     loadPersistedUserToken()
     if (!userRefreshToken && !userAccessToken) return null
     if (userAccessToken && userTokenExpiresAt > Date.now() + 30000) {
-      console.log('[spotify] 已从持久化文件恢复 access token')
+      console.log('[spotify] 已从环境变量恢复 access token')
       return userAccessToken
     }
     if (userRefreshToken) {
@@ -188,7 +237,7 @@ async function exchangeCode(code) {
   userAccessToken = data.access_token
   userRefreshToken = data.refresh_token
   userTokenExpiresAt = Date.now() + (data.expires_in - 60) * 1000
-  persistUserToken()
+  await persistUserToken()
   return data
 }
 
@@ -211,7 +260,7 @@ async function refreshUserToken() {
   userAccessToken = data.access_token
   userTokenExpiresAt = Date.now() + (data.expires_in - 60) * 1000
   if (data.refresh_token) userRefreshToken = data.refresh_token
-  persistUserToken()
+  await persistUserToken()
   return userAccessToken
 }
 
