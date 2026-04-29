@@ -2058,7 +2058,11 @@
   function playPrevious() {
     hasUnlockedAudio = true
     if (state.progress > 3) {
-      audio.currentTime = 0
+      if (spotifyCurrentUri && spotifyReady) {
+        spotifySeek(0)
+      } else {
+        audio.currentTime = 0
+      }
       return
     }
     const previous = playedHistory.pop()
@@ -4063,7 +4067,8 @@
   document.getElementById('btn-dislike').addEventListener('click', () => sendFeedback('dislike'))
   const SHICHIYOU_SYMBOLS = ['☀', '☽', '♂', '☿', '♃', '♀', '♄']
   function updateShichiyouBtn() {
-    const day = new Date().getDay()
+    const shanghaiDate = new Date(new Date().toLocaleString('en-US', { timeZone: 'Asia/Shanghai' }))
+    const day = shanghaiDate.getDay()
     const el = document.getElementById('shichiyou-symbol')
     if (el) el.textContent = SHICHIYOU_SYMBOLS[day]
   }
