@@ -92,6 +92,12 @@ async function persistUserToken() {
   }
 
   const { projectId, serviceId, environmentId, apiToken } = getRailwayTokenContext()
+  console.log('[spotify] Railway API 上下文:', {
+    hasRailwayApiToken: !!process.env.RAILWAY_API_TOKEN,
+    hasRailwayProjectId: !!process.env.RAILWAY_PROJECT_ID,
+    hasRailwayServiceId: !!process.env.RAILWAY_SERVICE_ID,
+    hasRailwayEnvironmentId: !!process.env.RAILWAY_ENVIRONMENT_ID,
+  })
   if (!apiToken || !projectId || !serviceId || !environmentId) {
     console.warn('[spotify] 未配置完整 Railway API 上下文，跳过环境变量持久化')
     return false
