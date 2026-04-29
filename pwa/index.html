@@ -1150,6 +1150,7 @@
   let commentaryDucking = null
   let playedHistory = []
   let hasUnlockedAudio = false
+  let pendingTuneInAutoplay = false
   let stationPayload = null
   let lastPlaylistSignature = null
   let ws = null
@@ -1639,6 +1640,28 @@
     }
   }
 
+  function startQueuePlaybackFromTuneIn() {
+    if (localQueue.length === 0) return false
+    const first = localQueue.shift()
+    state.queue = localQueue.slice()
+    renderQueue()
+    playSong(first)
+    return true
+  }
+
+  function triggerTuneInAudio(payload = stationPayload) {
+    const startedPrimary = startQueuePlaybackFromTuneIn()
+    if (payload && payload.say_audio) {
+      playVoice(payload.say_audio, true, () => ensurePrimaryPlayback())
+      return startedPrimary
+    }
+    if (!startedPrimary) {
+      ensurePrimaryPlayback()
+      return false
+    }
+    return true
+  }
+
   async function sendFeedback(action) {
     if (!state.currentTrack || !state.currentTrack.name || !state.currentTrack.artist) return
     try {
@@ -1819,6 +1842,7 @@
 
   function ensurePrimaryPlayback() {
     if (spotifyCurrentUri && !spotifyReady) return
+    if (pendingSpotifyItem) return
     if (!audio.src && !spotifyCurrentUri) {
       if (localQueue.length > 0) advanceToNext()
       return
@@ -2066,6 +2090,13 @@
         }
         if (data.type === 'playlist-ready') {
           stationPayload = data
+          if (hasUnlockedAudio && !state.showStartOverlay && pendingTuneInAutoplay) {
+            const started = triggerTuneInAudio(data)
+            if (started) pendingTuneInAutoplay = false
+          } else if (!hasUnlockedAudio) {
+            state.showStartOverlay = true
+            renderOverlay()
+          }
         }
         if (data.type === 'playlist-ready' && data.say) {
           const signature = JSON.stringify({
@@ -2077,13 +2108,9 @@
             lastPlaylistSignature = signature
             appendDj(data.say, data.say_audio || null)
             if (hasUnlockedAudio && !state.showStartOverlay) {
-              ensurePrimaryPlayback()
-              if (data.say_audio) {
+              if (!pendingTuneInAutoplay && data.say_audio) {
                 setTimeout(() => playVoice(data.say_audio, true), audio.src ? 180 : 260)
               }
-            } else if (!hasUnlockedAudio) {
-              state.showStartOverlay = true
-              renderOverlay()
             }
           }
         }
@@ -2261,13 +2288,13 @@
 
   function startListening() {
     hasUnlockedAudio = true
+    pendingTuneInAutoplay = true
     state.showStartOverlay = false
     renderOverlay()
-    if (stationPayload && stationPayload.say_audio) {
-      playVoice(stationPayload.say_audio, true, () => ensurePrimaryPlayback())
-      return
+    const started = triggerTuneInAudio(stationPayload)
+    if (started) {
+      pendingTuneInAutoplay = false
     }
-    ensurePrimaryPlayback()
   }
 
   const visualState = {
