@@ -75,6 +75,7 @@ let currentNowPlaying = null
 const DEFAULT_MIN_BATCH_SIZE = 8
 const DEFAULT_MAX_BATCH_SIZE = 12
 const READY_POOL_TARGET_SIZE = 30
+const STARTUP_POOL_SIZE = 10
 const READY_POOL_REFILL_THRESHOLD = 10
 const LOW_WATER_MARK = READY_POOL_REFILL_THRESHOLD
 const READY_POOL_ROUND_SIZE = 15
@@ -914,7 +915,7 @@ async function bootstrapStation() {
     await context.fetchWeatherByCity()
     const prewarmQueue = await buildReadyPoolMultiRound('startup-prewarm', {
       baseQueue: [],
-      targetSize: READY_POOL_TARGET_SIZE,
+      targetSize: STARTUP_POOL_SIZE,
       maxDurationMs: STARTUP_PREWARM_TIMEOUT_MS,
     })
     suppressQueueBroadcasts = true
