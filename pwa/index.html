@@ -1151,6 +1151,7 @@
   let playedHistory = []
   let hasUnlockedAudio = false
   let pendingTuneInAutoplay = false
+  let pendingTuneInSpeech = false
   let stationPayload = null
   let lastPlaylistSignature = null
   let ws = null
@@ -1649,17 +1650,21 @@
     return true
   }
 
+  function playPendingTuneInSpeech(payload = stationPayload) {
+    if (!pendingTuneInSpeech || !hasUnlockedAudio || state.showStartOverlay || !payload?.say_audio) return false
+    pendingTuneInSpeech = false
+    playVoice(payload.say_audio, true, () => ensurePrimaryPlayback())
+    return true
+  }
+
   function triggerTuneInAudio(payload = stationPayload) {
     const startedPrimary = startQueuePlaybackFromTuneIn()
-    if (payload && payload.say_audio) {
-      playVoice(payload.say_audio, true, () => ensurePrimaryPlayback())
-      return startedPrimary
-    }
+    const playedTuneInSpeech = playPendingTuneInSpeech(payload)
     if (!startedPrimary) {
       ensurePrimaryPlayback()
-      return false
+      return { startedPrimary: false, playedTuneInSpeech }
     }
-    return true
+    return { startedPrimary: true, playedTuneInSpeech }
   }
 
   async function sendFeedback(action) {
@@ -2058,6 +2063,7 @@
     ws.onmessage = (event) => {
       try {
         const data = JSON.parse(event.data)
+        let consumedTuneInSpeech = false
         if (data.type === 'now-playing' && data.song_info) {
           state.currentTrack = data.song_info
           state.currentFeedback = null
@@ -2097,9 +2103,14 @@
         }
         if (data.type === 'playlist-ready') {
           stationPayload = data
-          if (hasUnlockedAudio && !state.showStartOverlay && pendingTuneInAutoplay) {
-            const started = triggerTuneInAudio(data)
-            if (started) pendingTuneInAutoplay = false
+          if (hasUnlockedAudio && !state.showStartOverlay) {
+            if (pendingTuneInAutoplay) {
+              const { startedPrimary, playedTuneInSpeech } = triggerTuneInAudio(data)
+              consumedTuneInSpeech = playedTuneInSpeech
+              if (startedPrimary) pendingTuneInAutoplay = false
+            } else {
+              consumedTuneInSpeech = playPendingTuneInSpeech(data)
+            }
           } else if (!hasUnlockedAudio) {
             state.showStartOverlay = true
             renderOverlay()
@@ -2115,7 +2126,7 @@
             lastPlaylistSignature = signature
             appendDj(data.say, data.say_audio || null)
             if (hasUnlockedAudio && !state.showStartOverlay) {
-              if (!pendingTuneInAutoplay && data.say_audio) {
+              if (!pendingTuneInAutoplay && !consumedTuneInSpeech && data.say_audio) {
                 setTimeout(() => playVoice(data.say_audio, true), audio.src ? 180 : 260)
               }
             }
@@ -2296,10 +2307,11 @@
   function startListening() {
     hasUnlockedAudio = true
     pendingTuneInAutoplay = true
+    pendingTuneInSpeech = true
     state.showStartOverlay = false
     renderOverlay()
-    const started = triggerTuneInAudio(stationPayload)
-    if (started) {
+    const { startedPrimary } = triggerTuneInAudio(stationPayload)
+    if (startedPrimary) {
       pendingTuneInAutoplay = false
     }
   }
