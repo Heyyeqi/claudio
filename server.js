@@ -263,6 +263,7 @@ async function checkWeatherChange() {
 }
 
 let buildDjResponseChain = Promise.resolve()
+let stationBuildVersion = 0
 
 function runSerializedBuildDjResponse(task) {
   const next = buildDjResponseChain.then(task, task)
@@ -651,95 +652,64 @@ async function resolveQueue(songs) {
   return spotifyQueue.filter(Boolean)
 }
 
-async function buildDjResponse(input, options = {}) {
-  return runSerializedBuildDjResponse(async () => {
-    const {
-      persistMessages = true,
-      broadcast = false,
-      currentQueue = playQueue,
-      appendQueue = false,
-      includeSpeech = true,
-      emotionSignal = null,
-    } = options
+async function buildDjResponseCore(input, options = {}) {
+  const {
+    persistMessages = true,
+    broadcast = false,
+    currentQueue = playQueue,
+    appendQueue = false,
+    includeSpeech = true,
+    emotionSignal = null,
+    skipIfOutdated = false,
+    buildLabel = 'build',
+  } = options
+  const buildVersionAtStart = stationBuildVersion
 
-    const intent = router.route(input)
-    if (intent === 'system') {
-      return { say: null, say_audio: null, queue: [], reason: '', segue: '', intent }
+  const intent = router.route(input)
+  if (intent === 'system') {
+    return { say: null, say_audio: null, queue: [], reason: '', segue: '', intent }
+  }
+
+  const ctx = await context.buildContext(input, { currentQueue, emotionSignal })
+  const result = await claude.askClaude(ctx)
+
+  let queue = []
+  const recentPlays = state.getRecentPlays(120)
+  const recentRecommended = getRecentRecommendedKeySet()
+  const useSpotify = spotify.hasUserToken()
+
+  if (result.play && result.play.length > 0) {
+    queue = await resolveQueue(result.play)
+    queue = filterQueueCandidates(queue, currentQueue, recentPlays, recentRecommended)
+
+    const refillAttempts = useSpotify ? 5 : 3
+    for (let attempt = 0; queue.length < MIN_BATCH_SIZE && attempt < refillAttempts; attempt++) {
+      const refillPrompt = useSpotify
+        ? `继续补足队列，还需要 ${MIN_BATCH_SIZE - queue.length} 首。只要 Spotify 可直接播放、歌名和艺人都严格匹配的歌，避开近期已播、当前队列里已有的歌，以及最近已经推荐过的歌。`
+        : `继续补足队列，还需要 ${MIN_BATCH_SIZE - queue.length} 首，避开近期已播、当前队列里已有的歌，以及最近已经推荐过的歌`
+      const refillCtx = await context.buildContext(refillPrompt, {
+        currentQueue: [...(currentQueue || []), ...queue],
+      })
+      const refillResult = await claude.askClaude(refillCtx)
+      const refillQueue = await resolveQueue(refillResult.play || [])
+      const mergedQueue = [...queue, ...refillQueue]
+      queue = filterQueueCandidates(mergedQueue, currentQueue, recentPlays, recentRecommended)
     }
 
-    const ctx = await context.buildContext(input, { currentQueue, emotionSignal })
-    const result = await claude.askClaude(ctx)
+    queue = queue.slice(0, MAX_BATCH_SIZE)
+    queue = markBatchEdges(queue)
 
-    let queue = []
-    const recentPlays = state.getRecentPlays(120)
-    const recentRecommended = getRecentRecommendedKeySet()
-    const useSpotify = spotify.hasUserToken()
+  }
 
-    if (result.play && result.play.length > 0) {
-      queue = await resolveQueue(result.play)
-      queue = filterQueueCandidates(queue, currentQueue, recentPlays, recentRecommended)
+  const say_audio = includeSpeech && result.say
+    ? await tts.synthesize(result.say).catch(e => {
+        console.error('[tts]', e.message)
+        return null
+      })
+    : null
 
-      const refillAttempts = useSpotify ? 5 : 3
-      for (let attempt = 0; queue.length < MIN_BATCH_SIZE && attempt < refillAttempts; attempt++) {
-        const refillPrompt = useSpotify
-          ? `继续补足队列，还需要 ${MIN_BATCH_SIZE - queue.length} 首。只要 Spotify 可直接播放、歌名和艺人都严格匹配的歌，避开近期已播、当前队列里已有的歌，以及最近已经推荐过的歌。`
-          : `继续补足队列，还需要 ${MIN_BATCH_SIZE - queue.length} 首，避开近期已播、当前队列里已有的歌，以及最近已经推荐过的歌`
-        const refillCtx = await context.buildContext(refillPrompt, {
-          currentQueue: [...(currentQueue || []), ...queue],
-        })
-        const refillResult = await claude.askClaude(refillCtx)
-        const refillQueue = await resolveQueue(refillResult.play || [])
-        const mergedQueue = [...queue, ...refillQueue]
-        queue = filterQueueCandidates(mergedQueue, currentQueue, recentPlays, recentRecommended)
-      }
-
-      queue = queue.slice(0, MAX_BATCH_SIZE)
-      queue = markBatchEdges(queue)
-
-      scheduler.incrementCount()
-    }
-
-    playQueue = appendQueue
-      ? dedupeQueueItems([...(currentQueue || []), ...queue])
-      : [...queue]
-
-    if (queue.length > 0) {
-      rememberRecentRecommendedQueue(queue)
-    }
-
-    const say_audio = includeSpeech && result.say
-      ? await tts.synthesize(result.say).catch(e => {
-          console.error('[tts]', e.message)
-          return null
-        })
-      : null
-
-    if (persistMessages) {
-      state.addMessage('user', input)
-      state.addMessage('assistant', JSON.stringify(result))
-    }
-
-    if (broadcast) {
-      latestStationPayload = {
-        type: 'playlist-ready',
-        say: result.say,
-        say_audio,
-        queue,
-        reason: result.reason,
-        segue: result.segue,
-      }
-
-      scheduler.broadcast(latestStationPayload)
-
-      if (queue.length > 0) {
-        scheduler.broadcast({ type: 'now-playing', ...queue[0], queue })
-      }
-    }
-
-    if (includeSpeech && playQueue.length > 0 && playQueue.length < LOW_WATER_MARK) {
-      replenishQueueSilently('post-build').catch(() => {})
-    }
-
+  if (skipIfOutdated && stationBuildVersion !== buildVersionAtStart) {
+    console.log(`[claudio] ${buildLabel} 结果已过期，跳过写入`)
     return {
       say: includeSpeech ? result.say : null,
       say_audio,
@@ -747,8 +717,63 @@ async function buildDjResponse(input, options = {}) {
       reason: result.reason,
       segue: result.segue,
       intent,
+      skippedApply: true,
     }
-  })
+  }
+
+  stationBuildVersion += 1
+  playQueue = appendQueue
+    ? dedupeQueueItems([...(currentQueue || []), ...queue])
+    : [...queue]
+
+  if (queue.length > 0) {
+    scheduler.incrementCount()
+  }
+
+  if (queue.length > 0) {
+    rememberRecentRecommendedQueue(queue)
+  }
+
+  if (persistMessages) {
+    state.addMessage('user', input)
+    state.addMessage('assistant', JSON.stringify(result))
+  }
+
+  if (broadcast) {
+    latestStationPayload = {
+      type: 'playlist-ready',
+      say: result.say,
+      say_audio,
+      queue,
+      reason: result.reason,
+      segue: result.segue,
+    }
+
+    scheduler.broadcast(latestStationPayload)
+
+    if (queue.length > 0) {
+      scheduler.broadcast({ type: 'now-playing', ...queue[0], queue })
+    }
+  }
+
+  if (includeSpeech && playQueue.length > 0 && playQueue.length < LOW_WATER_MARK) {
+    replenishQueueSilently('post-build').catch(() => {})
+  }
+
+  return {
+    say: includeSpeech ? result.say : null,
+    say_audio,
+    queue,
+    reason: result.reason,
+    segue: result.segue,
+    intent,
+  }
+}
+
+async function buildDjResponse(input, options = {}) {
+  const task = () => buildDjResponseCore(input, options)
+  if (options.serialize === false) return task()
+  return runSerializedBuildDjResponse(task)
 }
 
 async function replenishQueueSilently(trigger = 'auto') {
@@ -786,6 +811,9 @@ async function bootstrapStation() {
     const result = await buildDjResponse(initialInput, {
       persistMessages: false,
       broadcast: true,
+      serialize: false,
+      skipIfOutdated: true,
+      buildLabel: 'bootstrap',
     })
     console.log(`[claudio] 开机自动选曲完成，生成 ${result.queue.length} 首`)
 
