@@ -71,11 +71,14 @@ scheduler.setWsClients(wsClients)
 
 // ── 内存播放队列 ──────────────────────────────
 let currentNowPlaying = null
-const MIN_BATCH_SIZE = 8
-const MAX_BATCH_SIZE = 12
-const READY_POOL_TARGET_SIZE = 12
-const READY_POOL_REFILL_THRESHOLD = 4
+const DEFAULT_MIN_BATCH_SIZE = 8
+const DEFAULT_MAX_BATCH_SIZE = 12
+const READY_POOL_TARGET_SIZE = 30
+const READY_POOL_REFILL_THRESHOLD = 10
 const LOW_WATER_MARK = READY_POOL_REFILL_THRESHOLD
+const READY_POOL_ROUND_SIZE = 15
+const READY_POOL_MAX_ROUNDS = 8
+const READY_POOL_PARALLEL_ROUNDS = 2
 const ncmSearchCache = new Map()
 const SEARCH_CACHE_TTL_MS = 12 * 60 * 60 * 1000
 const SEARCH_CACHE_MISS_TTL_MS = 30 * 60 * 1000
@@ -706,6 +709,8 @@ async function resolveDjSelection(input, options = {}) {
     currentQueue = queueManager.getSnapshot(),
     includeSpeech = true,
     emotionSignal = null,
+    minQueueSize = DEFAULT_MIN_BATCH_SIZE,
+    maxQueueSize = DEFAULT_MAX_BATCH_SIZE,
   } = options
 
   const intent = router.route(input)
@@ -726,10 +731,10 @@ async function resolveDjSelection(input, options = {}) {
     queue = filterQueueCandidates(queue, currentQueue, recentPlays, recentRecommended)
 
     const refillAttempts = useSpotify ? 5 : 3
-    for (let attempt = 0; queue.length < MIN_BATCH_SIZE && attempt < refillAttempts; attempt++) {
+    for (let attempt = 0; queue.length < minQueueSize && attempt < refillAttempts; attempt++) {
       const refillPrompt = useSpotify
-        ? `继续补足队列，还需要 ${MIN_BATCH_SIZE - queue.length} 首。只要 Spotify 可直接播放、歌名和艺人都严格匹配的歌，避开近期已播、当前队列里已有的歌，以及最近已经推荐过的歌。`
-        : `继续补足队列，还需要 ${MIN_BATCH_SIZE - queue.length} 首，避开近期已播、当前队列里已有的歌，以及最近已经推荐过的歌`
+        ? `继续补足队列，还需要 ${minQueueSize - queue.length} 首。只要 Spotify 可直接播放、歌名和艺人都严格匹配的歌，避开近期已播、当前队列里已有的歌，以及最近已经推荐过的歌。`
+        : `继续补足队列，还需要 ${minQueueSize - queue.length} 首，避开近期已播、当前队列里已有的歌，以及最近已经推荐过的歌`
       const refillCtx = await context.buildContext(refillPrompt, {
         currentQueue: [...(currentQueue || []), ...queue],
       })
@@ -739,7 +744,7 @@ async function resolveDjSelection(input, options = {}) {
       queue = filterQueueCandidates(mergedQueue, currentQueue, recentPlays, recentRecommended)
     }
 
-    queue = queue.slice(0, MAX_BATCH_SIZE)
+    queue = queue.slice(0, maxQueueSize)
     queue = markBatchEdges(queue)
   }
 
@@ -840,14 +845,80 @@ async function buildReadyPoolBatch(input, options = {}) {
   const result = await resolveDjSelection(input, {
     currentQueue: queueManager.getSnapshot(),
     includeSpeech: false,
+    minQueueSize: READY_POOL_ROUND_SIZE,
+    maxQueueSize: READY_POOL_ROUND_SIZE,
     ...options,
   })
   return result.queue || []
 }
 
-queueManager.setRefillHandler(async ({ reason }) => {
-  return buildReadyPoolBatch('根据当前时间继续补充几首适合接着听的歌', {
-    buildLabel: `refill:${reason}`,
+function makeReadyPoolPrompt(reason, needed) {
+  if (reason === 'startup-prewarm' || reason === 'bootstrap') {
+    return `按当前时间、天气和用户整体品味推荐 ${READY_POOL_ROUND_SIZE} 首可直接播放的歌，作为电台启动预热池。必须避开近期已播和当前池里已有的歌。`
+  }
+  return `继续补充播放池，推荐 ${READY_POOL_ROUND_SIZE} 首可直接播放的歌。当前还缺约 ${needed} 首，请避开当前池里已有的歌和最近 50 首播放记录。`
+}
+
+async function buildReadyPoolMultiRound(reason, options = {}) {
+  const baseQueue = Array.isArray(options.baseQueue) ? options.baseQueue.slice() : queueManager.getSnapshot()
+  const targetSize = options.targetSize || READY_POOL_TARGET_SIZE
+  const maxRounds = options.maxRounds || READY_POOL_MAX_ROUNDS
+  const parallelRounds = options.parallelRounds || READY_POOL_PARALLEL_ROUNDS
+  const recentPlays = state.getRecentPlays(50)
+  const recentPlayQueueItems = recentPlays.map(play => ({
+    song_info: {
+      id: play.song_id || play.id || null,
+      name: play.song_name || play.name || '',
+      artist: play.artist || '',
+    },
+  }))
+  const collected = []
+  let roundsUsed = 0
+
+  while (baseQueue.length + collected.length < targetSize && roundsUsed < maxRounds) {
+    const remainingRounds = maxRounds - roundsUsed
+    const deficit = targetSize - (baseQueue.length + collected.length)
+    const waveCount = Math.min(
+      parallelRounds,
+      remainingRounds,
+      Math.max(1, Math.ceil(deficit / READY_POOL_ROUND_SIZE))
+    )
+    const waveCurrentQueue = dedupeQueueItems([...baseQueue, ...collected, ...recentPlayQueueItems])
+    const prompt = makeReadyPoolPrompt(reason, deficit)
+    const waveTasks = Array.from({ length: waveCount }, (_, index) =>
+      buildReadyPoolBatch(prompt, {
+        currentQueue: waveCurrentQueue,
+        buildLabel: `refill:${reason}:round-${roundsUsed + index + 1}`,
+      }).catch(error => {
+        console.error(`[queue] 预热轮次失败(${reason}#${roundsUsed + index + 1}):`, error.message)
+        return []
+      })
+    )
+    const waveResults = await Promise.all(waveTasks)
+    roundsUsed += waveCount
+
+    let insertedThisWave = 0
+    for (const items of waveResults) {
+      const deduped = dedupeQueueItems(items, [...baseQueue, ...collected])
+      if (!deduped.length) continue
+      collected.push(...deduped)
+      insertedThisWave += deduped.length
+      if (baseQueue.length + collected.length >= targetSize) break
+    }
+
+    if (insertedThisWave === 0) break
+  }
+
+  return collected.slice(0, Math.max(0, targetSize - baseQueue.length))
+}
+
+queueManager.setRefillHandler(async ({ reason, needed, currentQueue, force }) => {
+  const targetSize = force
+    ? READY_POOL_TARGET_SIZE
+    : Math.max(READY_POOL_TARGET_SIZE, (currentQueue?.length || 0) + needed)
+  return buildReadyPoolMultiRound(reason, {
+    baseQueue: currentQueue,
+    targetSize,
   })
 })
 
@@ -856,16 +927,13 @@ async function bootstrapStation() {
     recentRecommendedKeys = []
     state.setPref(RECENT_RECOMMENDED_PREF, JSON.stringify([]))
     await context.fetchWeatherByCity()
-    const initialInput = '根据当前时间推荐几首歌'
-    const result = await buildDjResponse(initialInput, {
-      persistMessages: false,
-      broadcast: true,
-      serialize: false,
-      skipIfOutdated: true,
-      buildLabel: 'bootstrap',
+    await queueManager.ensureFilled('startup-prewarm', { force: true })
+    const result = await resolveDjSelection('根据当前时间为这一整池歌做一个开场介绍', {
+      currentQueue: queueManager.getSnapshot(),
+      includeSpeech: true,
     })
-    console.log(`[claudio] 开机自动选曲完成，生成 ${result.queue.length} 首`)
-    replenishQueueSilently('bootstrap').catch(() => {})
+    broadcastPlaylistReady(result, queueManager.getSnapshot())
+    console.log(`[claudio] 启动预热完成，readyPool=${queueManager.size()} 首`)
 
     // 记录初始天气状态
     const initWeather = await context.getWeather()
