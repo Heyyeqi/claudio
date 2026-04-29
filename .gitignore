@@ -1,4 +1,5 @@
 .env
+.spotify-token.json
 cache/
 db/
 node_modules/

@@ -1387,11 +1387,12 @@ app.get('/api/spotify/status', async (req, res) => {
 })
 
 const PORT = process.env.PORT || 8080
-server.listen(PORT, () => {
+server.listen(PORT, async () => {
   console.log(`[claudio] 服务启动 → http://localhost:${PORT}`)
   for (const url of getLanUrls(PORT)) {
     console.log(`[claudio] 局域网访问: ${url}`)
   }
+  await spotify.initializeUserToken().catch(() => null)
   console.log(fs.existsSync(COOKIE_PATH)
     ? '[claudio] 已加载网易云 Cookie'
     : '[claudio] 提示：未登录网易云，运行 node scripts/ncm-login.js')

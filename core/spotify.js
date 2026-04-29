@@ -1,9 +1,12 @@
 // ── Spotify 模块 ─────────────────────────────────────────────────
 const state = require('./state')
+const fs = require('fs')
+const path = require('path')
 const CLIENT_ID = process.env.SPOTIFY_CLIENT_ID
 const CLIENT_SECRET = process.env.SPOTIFY_CLIENT_SECRET
 const REDIRECT_URI = process.env.SPOTIFY_REDIRECT_URI || 'https://web-production-a5193.up.railway.app/callback'
 const SPOTIFY_TOKEN_PREF = 'spotify_user_token_v1'
+const SPOTIFY_TOKEN_FILE = path.join(__dirname, '../.spotify-token.json')
 const SPOTIFY_BAD_TITLE_KWS = [
   'live', 'remix', 'acoustic', 'instrumental', 'cover', 'tribute',
   'karaoke', 'piano', 'version', 'ver.', 'edit', 'mono', 'demo',
@@ -13,6 +16,7 @@ let clientCredToken = null      // 用于搜索（不需要用户授权）
 let userAccessToken = null      // 用于播放（需要用户授权）
 let userRefreshToken = null
 let userTokenExpiresAt = 0
+let tokenInitPromise = null
 
 async function fetchJsonWithTimeout(url, options = {}, timeoutMs = 8000) {
   const controller = new AbortController()
@@ -24,31 +28,87 @@ async function fetchJsonWithTimeout(url, options = {}, timeoutMs = 8000) {
   }
 }
 
+function applyPersistedUserToken(parsed) {
+  if (!parsed || typeof parsed !== 'object') return false
+  if (parsed?.refresh_token) userRefreshToken = parsed.refresh_token
+  if (parsed?.access_token) userAccessToken = parsed.access_token
+  if (typeof parsed?.expires_at === 'number') userTokenExpiresAt = parsed.expires_at
+  return !!(userAccessToken || userRefreshToken)
+}
+
+function loadUserTokenFromFile() {
+  try {
+    if (!fs.existsSync(SPOTIFY_TOKEN_FILE)) return null
+    const raw = fs.readFileSync(SPOTIFY_TOKEN_FILE, 'utf8')
+    if (!raw) return null
+    return JSON.parse(raw)
+  } catch (e) {
+    console.error('[spotify] 读取 token 文件失败:', e.message)
+    return null
+  }
+}
+
 function loadPersistedUserToken() {
   try {
+    const fileToken = loadUserTokenFromFile()
+    if (applyPersistedUserToken(fileToken)) return
+
     const raw = state.getPref(SPOTIFY_TOKEN_PREF)
-    if (!raw) return
-    const parsed = JSON.parse(raw)
-    if (parsed?.refresh_token) userRefreshToken = parsed.refresh_token
-    if (parsed?.access_token) userAccessToken = parsed.access_token
-    if (typeof parsed?.expires_at === 'number') userTokenExpiresAt = parsed.expires_at
+    if (raw && applyPersistedUserToken(JSON.parse(raw))) return
+
+    const envToken = {
+      access_token: process.env.SPOTIFY_ACCESS_TOKEN || null,
+      refresh_token: process.env.SPOTIFY_REFRESH_TOKEN || null,
+      expires_at: Number(process.env.SPOTIFY_TOKEN_EXPIRES_AT || 0) || 0,
+    }
+    applyPersistedUserToken(envToken)
   } catch {}
 }
 
 function persistUserToken() {
+  const payload = {
+    access_token: userAccessToken,
+    refresh_token: userRefreshToken,
+    expires_at: userTokenExpiresAt,
+    updated_at: Date.now(),
+  }
   try {
-    state.setPref(SPOTIFY_TOKEN_PREF, JSON.stringify({
-      access_token: userAccessToken,
-      refresh_token: userRefreshToken,
-      expires_at: userTokenExpiresAt,
-      updated_at: Date.now(),
-    }))
+    fs.writeFileSync(SPOTIFY_TOKEN_FILE, JSON.stringify(payload, null, 2))
+  } catch (e) {
+    console.error('[spotify] 写入 token 文件失败:', e.message)
+  }
+  try {
+    state.setPref(SPOTIFY_TOKEN_PREF, JSON.stringify(payload))
   } catch (e) {
     console.error('[spotify] 保存 token 失败:', e.message)
   }
 }
 
 loadPersistedUserToken()
+
+async function initializeUserToken() {
+  if (tokenInitPromise) return tokenInitPromise
+  tokenInitPromise = (async () => {
+    loadPersistedUserToken()
+    if (!userRefreshToken && !userAccessToken) return null
+    if (userAccessToken && userTokenExpiresAt > Date.now() + 30000) {
+      console.log('[spotify] 已从持久化文件恢复 access token')
+      return userAccessToken
+    }
+    if (userRefreshToken) {
+      try {
+        const refreshed = await refreshUserToken()
+        console.log('[spotify] 已使用 refresh token 恢复 access token')
+        return refreshed
+      } catch (e) {
+        console.error('[spotify] 启动时刷新 token 失败:', e.message)
+        return null
+      }
+    }
+    return null
+  })()
+  return tokenInitPromise
+}
 
 function normalizeSpotifyText(text) {
   return String(text || '')
@@ -249,6 +309,7 @@ module.exports = {
   exchangeCode,
   getUserToken,
   hasUserToken,
+  initializeUserToken,
   refreshUserToken,
   resolveSpotifyUris,
   searchTrack,
